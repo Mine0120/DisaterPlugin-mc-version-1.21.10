@@ -433,7 +433,7 @@ public class DoomsdayManager {
         org.bukkit.block.data.BlockData data = b.getBlockData();
         if (data instanceof org.bukkit.block.data.Waterlogged wl && wl.isWaterlogged()) {
             wl.setWaterlogged(false);
-            b.setBlockData(wl, true);
+            b.setBlockData(wl, false);
             return true;
         }
         return false;
@@ -454,7 +454,7 @@ public class DoomsdayManager {
             if (removed >= budget) break;
             Block nb = w.getBlockAt(bx + d[0], by + d[1], bz + d[2]);
             if (isWaterSource(nb) && roll(evaporateChance(sev))) {
-                nb.setType(Material.AIR, true);
+                nb.setType(Material.AIR, false);
                 removed++;
             } else {
                 if (isFlowingWater(nb) && budget - removed > 0) {
@@ -477,7 +477,7 @@ public class DoomsdayManager {
             if (removed >= budget) break;
             Block nb = w.getBlockAt(bx + d[0], by + d[1], bz + d[2]);
             if (isWaterSource(nb) && roll(evaporateChance(sev))) {
-                nb.setType(Material.AIR, true);
+                nb.setType(Material.AIR, false);
                 removed++;
             }
         }
