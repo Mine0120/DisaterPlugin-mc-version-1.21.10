@@ -17,12 +17,6 @@ public class DoomsdayManager {
     private double baseSeverity, growthPerDay;
     private boolean allowManual;
 
-    private boolean roll(double p) {
-        if (p <= 0) return false;
-        if (p >= 1) return true;
-        return rnd.nextDouble() < p; // rnd는 클래스 상단에 있는 Random 필드입니다.
-    }
-
     // 스캔/성능
     private int scanRadiusChunks = 6;
     private int maxUpdatesPerTick = 80;
@@ -34,7 +28,7 @@ public class DoomsdayManager {
 
     private int tickCount = 0;
 
-    // ── 물 증발 가속 파라미터(없으면 기본값 사용)
+    // 물 증발 가속 파라미터(없으면 기본값 사용)
     private double waterSpeedMult = 2.5;  // 증발 확률 배수
     private int waterMaxSteps = 4;        // 한 샘플에서 최대 제거 블록 수
     private int waterExtraDepth = 2;      // 표면 아래로 더 파고들 깊이
@@ -141,7 +135,7 @@ public class DoomsdayManager {
         Block above = top.getRelative(0, 1, 0);
         Material aboveType = above.getType();
 
-        // 1) 물 증발 (강화판)
+        // 1) 물 증발 (근원 우선 + 워터로그드 + 상류 추적)
         if (isWater(type) || isWater(aboveType)) {
             int evaporated = evaporateWaterColumn(w, top.getX(), top.getY(), top.getZ(), severity);
             if (evaporated > 0) return evaporated;
@@ -185,7 +179,7 @@ public class DoomsdayManager {
     private double evaporateChance(double sev) {
         double base = plugin.getConfig().getDouble("doomsday.water.base", 0.12);
         double exp  = plugin.getConfig().getDouble("doomsday.water.exp", 1.1);
-        return Math.pow(sev, exp) * base * waterSpeedMult; // ★ 가속 배수 적용
+        return Math.pow(sev, exp) * base * waterSpeedMult; // 가속 배수 적용
     }
     private double grassDecayChance(double sev) {
         double base = plugin.getConfig().getDouble("doomsday.grass.base", 0.12);
@@ -201,38 +195,65 @@ public class DoomsdayManager {
         return Math.min(1.0, 0.15 + sev * 0.6);
     }
 
-    // ── 물 증발(강화판): 위/아래/옆으로 빠르게 줄이기
+    /* ── 물 증발(근원 우선): 근원(source) 제거 + 워터로그드 제거 + 얕은 반경 탐색 ── */
     private int evaporateWaterColumn(World w, int x, int y, int z, double sev) {
         int changed = 0;
+        int budget = waterMaxSteps; // 한 샘플에서 지울 수 있는 최대 블록 수
 
-        // 위로 0..2칸 (표면/수면)
-        for (int dy = 0; dy <= 2 && changed < waterMaxSteps; dy++) {
+        // 0) 해당 칸이 워터로그드면 먼저 물기 제거
+        Block here = w.getBlockAt(x, y, z);
+        if (clearWaterlogged(here)) {
+            changed++; if (--budget <= 0) return changed;
+        }
+
+        // 1) 표면/수면/바로 아래: 근원 물이면 확률적으로 제거, 흐르는 물이면 상류 근원 탐색
+        for (int dy = 0; dy <= 2 && budget > 0; dy++) {
             Block b = w.getBlockAt(x, y + dy, z);
-            if (isWater(b.getType()) && roll(evaporateChance(sev))) {
+            if (isWaterSource(b) && roll(evaporateChance(sev))) {
                 b.setType(Material.AIR, true);
-                changed++;
+                changed++; budget--;
+            } else if (isFlowingWater(b)) {
+                changed += drainUpstreamSources(b, sev, Math.min(2, budget));
+                budget = waterMaxSteps - changed;
+            } else {
+                clearWaterlogged(b);
             }
         }
-        // 아래로 1..extra-depth칸 (웅덩이 바닥 쪽)
-        for (int dd = 1; dd <= waterExtraDepth && changed < waterMaxSteps; dd++) {
+
+        // 2) 표면 아래로 더 파고듦 (웅덩이 바닥 쪽 근원 제거)
+        for (int dd = 1; dd <= waterExtraDepth && budget > 0; dd++) {
             Block b = w.getBlockAt(x, y - dd, z);
-            if (isWater(b.getType()) && roll(evaporateChance(sev) * 0.8)) {
+            if (isWaterSource(b) && roll(evaporateChance(sev) * 0.8)) {
                 b.setType(Material.AIR, true);
-                changed++;
+                changed++; budget--;
+            } else if (isFlowingWater(b)) {
+                changed += drainUpstreamSources(b, sev, Math.min(2, budget));
+                budget = waterMaxSteps - changed;
+            } else {
+                clearWaterlogged(b);
             }
         }
-        // 수평 확산(같은 높이 y에서 이웃도 제거 시도) — 물 웅덩이가 더 빨리 줄어듦
-        for (int i = 0; i < waterLateralTries && changed < waterMaxSteps; i++) {
-            int dx = (rnd.nextBoolean() ? 1 : -1) * (1 + rnd.nextInt(1));
-            int dz = (rnd.nextBoolean() ? 1 : -1) * (1 + rnd.nextInt(1));
+
+        // 3) 수평 확산: 같은 Y 레벨에서 주변 근원 몇 개 더 제거 (웅덩이 넓게 말리기)
+        int r = Math.min(3, 1 + (int)Math.round(severityClamp(sev) * 2)); // 반경 1~3
+        for (int i = 0; i < waterLateralTries && budget > 0; i++) {
+            int dx = rnd.nextInt(r * 2 + 1) - r;
+            int dz = rnd.nextInt(r * 2 + 1) - r;
             Block b = w.getBlockAt(x + dx, y, z + dz);
-            if (isWater(b.getType()) && roll(evaporateChance(sev))) {
+            if (isWaterSource(b) && roll(evaporateChance(sev))) {
                 b.setType(Material.AIR, true);
-                changed++;
+                changed++; budget--;
+            } else if (isFlowingWater(b)) {
+                changed += drainUpstreamSources(b, sev, Math.min(2, budget));
+                budget = waterMaxSteps - changed;
+            } else {
+                clearWaterlogged(b);
             }
         }
         return changed;
     }
+
+    /* ── 판정/유틸 ── */
 
     private boolean isWater(Material m) {
         return m == Material.WATER || m == Material.KELP || m == Material.KELP_PLANT
@@ -292,6 +313,93 @@ public class DoomsdayManager {
             if (side.getType().isAir()) { side.setType(Material.FIRE, true); return true; }
         }
         return false;
+    }
+
+    // 확률 롤
+    private boolean roll(double p) {
+        if (p <= 0) return false;
+        if (p >= 1) return true;
+        return rnd.nextDouble() < p;
+    }
+
+    /** 0~1 클램프 */
+    private double severityClamp(double v) { return v < 0 ? 0 : (v > 1 ? 1 : v); }
+
+    /** 해당 블록이 '근원 물'(Level 0)인지 판정 */
+    private boolean isWaterSource(Block b) {
+        if (b.getType() != Material.WATER) return false;
+        org.bukkit.block.data.BlockData data = b.getBlockData();
+        if (data instanceof org.bukkit.block.data.Levelled lv) {
+            return lv.getLevel() == 0; // Level 0 = source
+        }
+        return true; // Levelled가 아니면 대개 소스 취급
+    }
+
+    /** 흐르는 물(= WATER 이지만 Level > 0)인지 판정 */
+    private boolean isFlowingWater(Block b) {
+        if (b.getType() != Material.WATER) return false;
+        org.bukkit.block.data.BlockData data = b.getBlockData();
+        return (data instanceof org.bukkit.block.data.Levelled lv) && lv.getLevel() > 0;
+    }
+
+    /** 워터로그드 블록이면 물기 제거 (성공 시 true) */
+    private boolean clearWaterlogged(Block b) {
+        org.bukkit.block.data.BlockData data = b.getBlockData();
+        if (data instanceof org.bukkit.block.data.Waterlogged wl && wl.isWaterlogged()) {
+            wl.setWaterlogged(false);
+            b.setBlockData(wl, true);
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * 흐르는 물 블록 b 기준으로, 상/동/서/남/북(+위) 이웃에서 근원(source)을 찾아
+     * 확률적으로 제거한다. budget은 제거 가능한 최대 개수.
+     * 반환값: 실제 제거한 개수
+     */
+    private int drainUpstreamSources(Block b, double sev, int budget) {
+        if (budget <= 0) return 0;
+        int removed = 0;
+
+        // 상·동·서·남·북·위 순서(대략 상류에 가까운 쪽 우선)
+        final int[][] dirs = { {0,0,-1}, {-1,0,0}, {1,0,0}, {0,0,1}, {0,1,0} };
+        final int bx = b.getX(), by = b.getY(), bz = b.getZ();
+        final World w = b.getWorld();
+
+        for (int[] d : dirs) {
+            if (removed >= budget) break;
+            Block nb = w.getBlockAt(bx + d[0], by + d[1], bz + d[2]);
+            if (isWaterSource(nb) && roll(evaporateChance(sev))) {
+                nb.setType(Material.AIR, true);
+                removed++;
+            } else {
+                // 이웃이 흐르는 물이면 재귀적으로 한 단계 더 추적 (과도한 재귀 방지)
+                if (isFlowingWater(nb) && budget - removed > 0) {
+                    removed += drainUpstreamSourcesOneStep(nb, sev, budget - removed);
+                }
+            }
+        }
+        return removed;
+    }
+
+    /** 상류 한 단계만 더 살피는 가벼운 탐색(과도한 재귀 방지) */
+    private int drainUpstreamSourcesOneStep(Block b, double sev, int budget) {
+        if (budget <= 0) return 0;
+        int removed = 0;
+        final int[][] dirs = { {0,0,-1}, {-1,0,0}, {1,0,0}, {0,0,1}, {0,1,0} };
+        final int bx = b.getX(), by = b.getY(), bz = b.getZ();
+        final World w = b.getWorld();
+
+        for (int[] d : dirs) {
+            if (removed >= budget) break;
+            Block nb = w.getBlockAt(bx + d[0], by + d[1], bz + d[2]);
+            if (isWaterSource(nb) && roll(evaporateChance(sev))) {
+                nb.setType(Material.AIR, true);
+                removed++;
+            }
+        }
+        return removed;
     }
 
     /* ---------------- 일광 화상(물 속 면제 + 모든 LivingEntity 적용) ---------------- */
