@@ -46,6 +46,9 @@ bacteria:
     - COAL_ORE
     - COPPER_ORE
     - IRON_ORE
+    - SNOW
+    - SNOW_BLOCK
+    - ICE
 
 # ─────────────────────────────────────────
 # 메테오 (랜덤 낙하 + 이중 구 + 내부 채움 + 분화구 + 화염폭풍)
