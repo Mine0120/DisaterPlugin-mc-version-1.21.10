@@ -5,6 +5,7 @@ import org.bukkit.*;
 import org.bukkit.block.Block;
 import org.bukkit.entity.Player;
 import org.bukkit.scheduler.BukkitTask;
+import org.bukkit.block.Biome;
 
 import java.util.Random;
 
@@ -28,11 +29,19 @@ public class DoomsdayManager {
 
     private int tickCount = 0;
 
-    // 물 증발 가속 파라미터(없으면 기본값 사용)
+    // 물 증발 가속 파라미터
     private double waterSpeedMult = 2.5;  // 증발 확률 배수
-    private int waterMaxSteps = 4;        // 한 샘플에서 최대 제거 블록 수
-    private int waterExtraDepth = 2;      // 표면 아래로 더 파고들 깊이
-    private int waterLateralTries = 2;    // 표면 동일 Y에서 옆으로 퍼져 제거 시도
+    private int waterMaxSteps = 4;        // 일반 증발: 한 샘플에서 최대 제거 블록 수
+    private int waterExtraDepth = 2;      // 일반 증발: 표면 아래로 더 파고들 깊이
+    private int waterLateralTries = 2;    // 일반 증발: 수평 제거 시도
+
+    // ★ 오션 전용 패치 증발 파라미터
+    private boolean oceanModeEnabled = true;
+    private int oceanPatchRadius = 2;         // 반경 2 → 5×5
+    private int oceanVerticalSteps = 4;       // 아래로 몇 칸까지 지울지
+    private int oceanPatchBudget = 24;        // 패치 하나에서 지울 수 있는 최대 블록 수
+    private double oceanSpeedMult = 3.0;      // 오션 패치 시 추가 가속 배수
+    private int oceanSeaWindow = 2;           // 해수면 ±2 높이에서만 패치 우선 적용
 
     public DoomsdayManager(MineDisaster plugin) {
         this.plugin = plugin;
@@ -53,11 +62,19 @@ public class DoomsdayManager {
         maxUpdatesPerTick  = Math.max(10, plugin.getConfig().getInt("doomsday.max-updates-per-tick", 80));
         burnCheckInterval  = Math.max(5,  plugin.getConfig().getInt("doomsday.burn-check-interval", 20));
 
-        // 물 증발 가속 옵션(없으면 기본값 유지)
+        // 일반 물 증발
         waterSpeedMult   = Math.max(0.1, plugin.getConfig().getDouble("doomsday.water.speed-mult", 2.5));
         waterMaxSteps    = Math.max(1,   plugin.getConfig().getInt("doomsday.water.max-steps", 4));
         waterExtraDepth  = Math.max(0,   plugin.getConfig().getInt("doomsday.water.extra-depth", 2));
         waterLateralTries= Math.max(0,   plugin.getConfig().getInt("doomsday.water.lateral-tries", 2));
+
+        // 오션 전용
+        oceanModeEnabled   = plugin.getConfig().getBoolean("doomsday.water.ocean.enabled", true);
+        oceanPatchRadius   = Math.max(1, plugin.getConfig().getInt("doomsday.water.ocean.patch-radius", 2));
+        oceanVerticalSteps = Math.max(1, plugin.getConfig().getInt("doomsday.water.ocean.vertical-steps", 4));
+        oceanPatchBudget   = Math.max(4, plugin.getConfig().getInt("doomsday.water.ocean.per-patch-budget", 24));
+        oceanSpeedMult     = Math.max(1.0, plugin.getConfig().getDouble("doomsday.water.ocean.speed-mult", 3.0));
+        oceanSeaWindow     = Math.max(0, plugin.getConfig().getInt("doomsday.water.ocean.sea-window", 2));
     }
 
     public void start() { stop(); task = Bukkit.getScheduler().runTaskTimer(plugin, this::tick, 0L, tickInterval); }
@@ -135,7 +152,16 @@ public class DoomsdayManager {
         Block above = top.getRelative(0, 1, 0);
         Material aboveType = above.getType();
 
-        // 1) 물 증발 (근원 우선 + 워터로그드 + 상류 추적)
+        // ★ 오션 전용: 해수면 근처 + 바다/강/해변 바이옴이면 패치 증발 우선 적용
+        if (oceanModeEnabled && (isWater(type) || isWater(aboveType))) {
+            final int sea = safeSeaLevel(w);
+            final int y = top.getY();
+            if (Math.abs(y - sea) <= oceanSeaWindow && isOceanicBiome(w, top.getX(), y, top.getZ())) {
+                return evaporateOceanPatch(w, top.getX(), y, top.getZ(), severity);
+            }
+        }
+
+        // 1) 일반 물 증발 (근원 우선 + 워터로그드 + 상류 추적)
         if (isWater(type) || isWater(aboveType)) {
             int evaporated = evaporateWaterColumn(w, top.getX(), top.getY(), top.getZ(), severity);
             if (evaporated > 0) return evaporated;
@@ -167,7 +193,7 @@ public class DoomsdayManager {
 
         // 5) 목재 구조물(판자/계단/슬랩/울타리/문/트랩도어/간판/책장/상자 등) 점화
         if (isWoodenBlock(type)) {
-            if (roll(treeIgniteChance(severity))) { // 같은 확률 재활용(원하면 config 분리 가능)
+            if (roll(treeIgniteChance(severity))) {
                 if (tryIgniteAround(top)) return 1;
             }
         }
@@ -179,7 +205,10 @@ public class DoomsdayManager {
     private double evaporateChance(double sev) {
         double base = plugin.getConfig().getDouble("doomsday.water.base", 0.12);
         double exp  = plugin.getConfig().getDouble("doomsday.water.exp", 1.1);
-        return Math.pow(sev, exp) * base * waterSpeedMult; // 가속 배수 적용
+        return Math.pow(sev, exp) * base * waterSpeedMult; // 일반 가속 배수
+    }
+    private double evaporateChanceOcean(double sev) {
+        return evaporateChance(sev) * oceanSpeedMult; // 오션 추가 가속
     }
     private double grassDecayChance(double sev) {
         double base = plugin.getConfig().getDouble("doomsday.grass.base", 0.12);
@@ -195,18 +224,18 @@ public class DoomsdayManager {
         return Math.min(1.0, 0.15 + sev * 0.6);
     }
 
-    /* ── 물 증발(근원 우선): 근원(source) 제거 + 워터로그드 제거 + 얕은 반경 탐색 ── */
+    /* ── 일반 물 증발(근원 우선): 근원(source) 제거 + 워터로그드 제거 + 상류 얕은 추적 ── */
     private int evaporateWaterColumn(World w, int x, int y, int z, double sev) {
         int changed = 0;
-        int budget = waterMaxSteps; // 한 샘플에서 지울 수 있는 최대 블록 수
+        int budget = waterMaxSteps;
 
-        // 0) 해당 칸이 워터로그드면 먼저 물기 제거
+        // 0) 해당 칸 워터로그드 제거
         Block here = w.getBlockAt(x, y, z);
         if (clearWaterlogged(here)) {
             changed++; if (--budget <= 0) return changed;
         }
 
-        // 1) 표면/수면/바로 아래: 근원 물이면 확률적으로 제거, 흐르는 물이면 상류 근원 탐색
+        // 1) 표면/수면/바로 아래
         for (int dy = 0; dy <= 2 && budget > 0; dy++) {
             Block b = w.getBlockAt(x, y + dy, z);
             if (isWaterSource(b) && roll(evaporateChance(sev))) {
@@ -220,7 +249,7 @@ public class DoomsdayManager {
             }
         }
 
-        // 2) 표면 아래로 더 파고듦 (웅덩이 바닥 쪽 근원 제거)
+        // 2) 아래로 파고듦
         for (int dd = 1; dd <= waterExtraDepth && budget > 0; dd++) {
             Block b = w.getBlockAt(x, y - dd, z);
             if (isWaterSource(b) && roll(evaporateChance(sev) * 0.8)) {
@@ -234,8 +263,8 @@ public class DoomsdayManager {
             }
         }
 
-        // 3) 수평 확산: 같은 Y 레벨에서 주변 근원 몇 개 더 제거 (웅덩이 넓게 말리기)
-        int r = Math.min(3, 1 + (int)Math.round(severityClamp(sev) * 2)); // 반경 1~3
+        // 3) 수평 확산
+        int r = Math.min(3, 1 + (int)Math.round(severityClamp(sev) * 2));
         for (int i = 0; i < waterLateralTries && budget > 0; i++) {
             int dx = rnd.nextInt(r * 2 + 1) - r;
             int dz = rnd.nextInt(r * 2 + 1) - r;
@@ -253,7 +282,64 @@ public class DoomsdayManager {
         return changed;
     }
 
+    /* ── 오션 패치 증발: 표면 패치(반경 R) 내부 근원 물 다수 제거 + 상류 추적 ── */
+    private int evaporateOceanPatch(World w, int x, int y, int z, double sev) {
+        int changed = 0;
+        int budget = oceanPatchBudget;
+        int R = oceanPatchRadius;
+        int sea = safeSeaLevel(w);
+
+        // 패치 내부: 위→아래로 훑으면서 근원/흐름 처리
+        for (int dx = -R; dx <= R && budget > 0; dx++) {
+            for (int dz = -R; dz <= R && budget > 0; dz++) {
+                // 살짝 원형 느낌
+                if (dx*dx + dz*dz > R*R + R) continue;
+
+                // 표면 y 기준으로 위/아래 범위
+                for (int dy = 0; dy <= oceanVerticalSteps && budget > 0; dy++) {
+                    Block bUp = w.getBlockAt(x + dx, y + dy, z + dz);
+                    if (isWaterSource(bUp) && roll(evaporateChanceOcean(sev))) {
+                        bUp.setType(Material.AIR, true);
+                        changed++; if (--budget <= 0) break;
+                    } else if (isFlowingWater(bUp)) {
+                        changed += drainUpstreamSources(bUp, sev, Math.min(3, budget));
+                        budget = oceanPatchBudget - changed;
+                    } else {
+                        clearWaterlogged(bUp);
+                    }
+                }
+                for (int dd = 1; dd <= oceanVerticalSteps && budget > 0; dd++) {
+                    Block bDown = w.getBlockAt(x + dx, y - dd, z + dz);
+                    // 해수면보다 훨씬 아래는 너무 깊으니 확률 낮춤
+                    double mult = (y - dd >= sea - 6) ? 1.0 : 0.6;
+                    if (isWaterSource(bDown) && roll(evaporateChanceOcean(sev) * mult)) {
+                        bDown.setType(Material.AIR, true);
+                        changed++; if (--budget <= 0) break;
+                    } else if (isFlowingWater(bDown)) {
+                        changed += drainUpstreamSources(bDown, sev, Math.min(3, budget));
+                        budget = oceanPatchBudget - changed;
+                    } else {
+                        clearWaterlogged(bDown);
+                    }
+                }
+            }
+        }
+        return changed;
+    }
+
     /* ── 판정/유틸 ── */
+
+    private int safeSeaLevel(World w) {
+        try { return w.getSeaLevel(); } catch (Throwable t) { return 62; }
+    }
+
+    private boolean isOceanicBiome(World w, int x, int y, int z) {
+        Biome b;
+        try { b = w.getBiome(x, y, z); }
+        catch (Throwable t) { b = w.getBiome(x, z); } // 구버전 호환
+        String n = b.name();
+        return n.contains("OCEAN") || n.equals("BEACH") || n.equals("RIVER");
+    }
 
     private boolean isWater(Material m) {
         return m == Material.WATER || m == Material.KELP || m == Material.KELP_PLANT
@@ -296,7 +382,7 @@ public class DoomsdayManager {
             case "CHEST": case "TRAPPED_CHEST": case "BARREL":
             case "LECTERN":
             case "LADDER":
-            case "SCAFFOLDING": // 대나무 足場(가연성)
+            case "SCAFFOLDING":
                 return true;
             default:
                 return false;
@@ -325,24 +411,24 @@ public class DoomsdayManager {
     /** 0~1 클램프 */
     private double severityClamp(double v) { return v < 0 ? 0 : (v > 1 ? 1 : v); }
 
-    /** 해당 블록이 '근원 물'(Level 0)인지 판정 */
+    /** '근원 물'(Level 0) 판정 */
     private boolean isWaterSource(Block b) {
         if (b.getType() != Material.WATER) return false;
         org.bukkit.block.data.BlockData data = b.getBlockData();
         if (data instanceof org.bukkit.block.data.Levelled lv) {
             return lv.getLevel() == 0; // Level 0 = source
         }
-        return true; // Levelled가 아니면 대개 소스 취급
+        return true;
     }
 
-    /** 흐르는 물(= WATER 이지만 Level > 0)인지 판정 */
+    /** 흐르는 물 (= WATER & Level > 0) */
     private boolean isFlowingWater(Block b) {
         if (b.getType() != Material.WATER) return false;
         org.bukkit.block.data.BlockData data = b.getBlockData();
         return (data instanceof org.bukkit.block.data.Levelled lv) && lv.getLevel() > 0;
     }
 
-    /** 워터로그드 블록이면 물기 제거 (성공 시 true) */
+    /** 워터로그드 물기 제거 */
     private boolean clearWaterlogged(Block b) {
         org.bukkit.block.data.BlockData data = b.getBlockData();
         if (data instanceof org.bukkit.block.data.Waterlogged wl && wl.isWaterlogged()) {
@@ -354,15 +440,12 @@ public class DoomsdayManager {
     }
 
     /**
-     * 흐르는 물 블록 b 기준으로, 상/동/서/남/북(+위) 이웃에서 근원(source)을 찾아
-     * 확률적으로 제거한다. budget은 제거 가능한 최대 개수.
-     * 반환값: 실제 제거한 개수
+     * 흐르는 물 기준 이웃에서 근원(source) 찾아 제거 (얕은 추적 + 예산 제한)
      */
     private int drainUpstreamSources(Block b, double sev, int budget) {
         if (budget <= 0) return 0;
         int removed = 0;
 
-        // 상·동·서·남·북·위 순서(대략 상류에 가까운 쪽 우선)
         final int[][] dirs = { {0,0,-1}, {-1,0,0}, {1,0,0}, {0,0,1}, {0,1,0} };
         final int bx = b.getX(), by = b.getY(), bz = b.getZ();
         final World w = b.getWorld();
@@ -374,7 +457,6 @@ public class DoomsdayManager {
                 nb.setType(Material.AIR, true);
                 removed++;
             } else {
-                // 이웃이 흐르는 물이면 재귀적으로 한 단계 더 추적 (과도한 재귀 방지)
                 if (isFlowingWater(nb) && budget - removed > 0) {
                     removed += drainUpstreamSourcesOneStep(nb, sev, budget - removed);
                 }
@@ -383,7 +465,7 @@ public class DoomsdayManager {
         return removed;
     }
 
-    /** 상류 한 단계만 더 살피는 가벼운 탐색(과도한 재귀 방지) */
+    /** 상류 한 단계만 더 살피는 가벼운 탐색 */
     private int drainUpstreamSourcesOneStep(Block b, double sev, int budget) {
         if (budget <= 0) return 0;
         int removed = 0;

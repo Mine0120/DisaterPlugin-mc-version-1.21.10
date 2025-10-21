@@ -19,10 +19,17 @@ doomsday:
   manual-default: -1.0
 
   water:
-    speed-mult: 3.5     # ← 증발 확률 추가 배수 (기본 2.5)
-    max-steps: 6        # ← 한 번에 증발시키는 칸 수 (기본 4)
-    extra-depth: 3      # ← 표면 아래 더 파고들 깊이 (기본 2)
-    lateral-tries: 3    # ← 옆 칸에서도 제거 시도 횟수 (기본 2)
+    speed-mult: 4.5     # ← 증발 확률 추가 배수 (기본 2.5)
+    max-steps: 9        # ← 한 번에 증발시키는 칸 수 (기본 4)
+    extra-depth: 5      # ← 표면 아래 더 파고들 깊이 (기본 2)
+    lateral-tries: 6    # ← 옆 칸에서도 제거 시도 횟수 (기본 2)
+    ocean:
+      enabled: true
+      patch-radius: 3              # 패치 반경(3 → 7×7 면적)
+      vertical-steps: 6            # 아래로 더 깊게
+      per-patch-budget: 36         # 패치당 최대 제거량
+      speed-mult: 4.0              # 오션 패치 가속 배수
+      sea-window: 3                # 해수면 ±3 높이에서 패치 우선
 
   trees: { base: 0.20, exp: 1.0 }
   grass: { base: 0.24, exp: 1.0 }
@@ -59,6 +66,8 @@ bacteria:
     - ANDESITE
     - PACKED_ICE
     - COBBLESTONE
+    - EMERALD_ORE
+    - POWDER_SNOW
 
 # ─────────────────────────────────────────
 # 메테오 (랜덤 낙하 + 이중 구 + 내부 채움 + 분화구 + 화염폭풍)
