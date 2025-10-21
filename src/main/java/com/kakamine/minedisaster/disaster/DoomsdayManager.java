@@ -239,7 +239,7 @@ public class DoomsdayManager {
         for (int dy = 0; dy <= 2 && budget > 0; dy++) {
             Block b = w.getBlockAt(x, y + dy, z);
             if (isWaterSource(b) && roll(evaporateChance(sev))) {
-                b.setType(Material.AIR, true);
+                b.setType(Material.AIR, false);
                 changed++; budget--;
             } else if (isFlowingWater(b)) {
                 changed += drainUpstreamSources(b, sev, Math.min(2, budget));
@@ -253,7 +253,7 @@ public class DoomsdayManager {
         for (int dd = 1; dd <= waterExtraDepth && budget > 0; dd++) {
             Block b = w.getBlockAt(x, y - dd, z);
             if (isWaterSource(b) && roll(evaporateChance(sev) * 0.8)) {
-                b.setType(Material.AIR, true);
+                b.setType(Material.AIR, false);
                 changed++; budget--;
             } else if (isFlowingWater(b)) {
                 changed += drainUpstreamSources(b, sev, Math.min(2, budget));
@@ -270,7 +270,7 @@ public class DoomsdayManager {
             int dz = rnd.nextInt(r * 2 + 1) - r;
             Block b = w.getBlockAt(x + dx, y, z + dz);
             if (isWaterSource(b) && roll(evaporateChance(sev))) {
-                b.setType(Material.AIR, true);
+                b.setType(Material.AIR, false);
                 changed++; budget--;
             } else if (isFlowingWater(b)) {
                 changed += drainUpstreamSources(b, sev, Math.min(2, budget));
@@ -299,7 +299,7 @@ public class DoomsdayManager {
                 for (int dy = 0; dy <= oceanVerticalSteps && budget > 0; dy++) {
                     Block bUp = w.getBlockAt(x + dx, y + dy, z + dz);
                     if (isWaterSource(bUp) && roll(evaporateChanceOcean(sev))) {
-                        bUp.setType(Material.AIR, true);
+                        bUp.setType(Material.AIR, false);
                         changed++; if (--budget <= 0) break;
                     } else if (isFlowingWater(bUp)) {
                         changed += drainUpstreamSources(bUp, sev, Math.min(3, budget));
@@ -313,7 +313,7 @@ public class DoomsdayManager {
                     // 해수면보다 훨씬 아래는 너무 깊으니 확률 낮춤
                     double mult = (y - dd >= sea - 6) ? 1.0 : 0.6;
                     if (isWaterSource(bDown) && roll(evaporateChanceOcean(sev) * mult)) {
-                        bDown.setType(Material.AIR, true);
+                        bDown.setType(Material.AIR, false);
                         changed++; if (--budget <= 0) break;
                     } else if (isFlowingWater(bDown)) {
                         changed += drainUpstreamSources(bDown, sev, Math.min(3, budget));
