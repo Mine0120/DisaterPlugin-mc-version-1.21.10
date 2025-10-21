@@ -9,17 +9,12 @@ import org.bukkit.block.Block;
 import org.bukkit.event.Listener;
 import org.bukkit.scheduler.BukkitRunnable;
 
-import java.util.HashSet;
-import java.util.List;
-import java.util.Random;
-import java.util.Set;
+import java.util.*;
 
 /**
- * 예전 스타일 박테리아:
- * - 시작 지점에서 주변으로 계속 퍼짐(6방향)
- * - 지정 수명 후 감염 블록은 replace-after로 복원
- * - /disaster stop bacteria 시 모든 흔적 즉시 제거
- * - config.yml의 bacteria 섹션 사용
+ * 예전 스타일 박테리아(랜덤 확산) + 흔적 정리
+ * - 공기/베드락/커맨드블록/구조블록/포털 등 파괴 불가·특수 블록은 제외
+ * - setType(..., true)로 물리 상호작용 유도
  */
 public class BacteriaManager implements Listener {
 
@@ -58,7 +53,7 @@ public class BacteriaManager implements Listener {
         targetBlocks = new HashSet<>();
         List<String> list = plugin.getConfig().getStringList("bacteria.target-blocks");
         if (list == null || list.isEmpty()) {
-            // 기본 대상
+            // 기본 대상: 지형성 블록 위주
             list = List.of("GRASS_BLOCK","DIRT","STONE","SAND","GRAVEL","DEEPSLATE","TUFF");
         }
         for (String s : list) {
@@ -67,14 +62,36 @@ public class BacteriaManager implements Listener {
         }
     }
 
-    /** 정수 좌표로 고정 */
+    /** 정수 좌표 키 */
     private Location keyOf(Block b) {
         return new Location(b.getWorld(), b.getX(), b.getY(), b.getZ());
     }
 
+    /** 감염 가능한 블록인지 (공기/파괴불가/특수 제외 + 타깃 화이트리스트 충족) */
+    private boolean isInfectable(Block b) {
+        Material m = b.getType();
+
+        // 공기/유체/식생 등 쉽게 통과하는 것 제외
+        if (m == Material.AIR || m == Material.CAVE_AIR || m == Material.VOID_AIR) return false;
+        if (m == Material.WATER || m == Material.LAVA || m == Material.KELP || m == Material.KELP_PLANT
+                || m == Material.SEAGRASS || m == Material.TALL_SEAGRASS || m == Material.BUBBLE_COLUMN) return false;
+
+        // 파괴 불가 & 특수(명시 블랙리스트)
+        if (m == Material.BEDROCK || m == Material.BARRIER || m == Material.LIGHT) return false;
+        if (m == Material.COMMAND_BLOCK || m == Material.REPEATING_COMMAND_BLOCK || m == Material.CHAIN_COMMAND_BLOCK) return false;
+        if (m == Material.STRUCTURE_BLOCK || m == Material.JIGSAW) return false;
+        if (m == Material.END_PORTAL_FRAME || m == Material.END_GATEWAY || m == Material.END_PORTAL) return false;
+        if (m == Material.NETHER_PORTAL) return false;
+
+        // (선택) 인벤터리 블록/광물 등 건드리고 싶지 않다면 여기서 더 제외 가능
+
+        // 화이트리스트( config의 target-blocks ) 충족
+        return targetBlocks.isEmpty() || targetBlocks.contains(m);
+    }
+
     /** 박테리아 시작 */
     public void startInfection(Location start, int radius, Integer perTickOverride, int startDelay) {
-        if (running) cancelAll(); // 기존 진행 있으면 정리
+        if (running) cancelAll();
 
         running = true;
         infected.clear();
@@ -82,7 +99,7 @@ public class BacteriaManager implements Listener {
         final World world = start.getWorld();
         final int workPerTick = (perTickOverride != null && perTickOverride > 0) ? perTickOverride : perTick;
 
-        // 초깃값: 시드 몇 개 심기 (주변 지면)
+        // 시드 배치
         int seeds = Math.max(1, radius * 2);
         for (int i = 0; i < seeds; i++) {
             int dx = random.nextInt(radius * 2 + 1) - radius;
@@ -91,7 +108,7 @@ public class BacteriaManager implements Listener {
             int z = start.getBlockZ() + dz;
             int y = world.getHighestBlockYAt(x, z) - 1;
             Block base = world.getBlockAt(x, y, z);
-            if (targetBlocks.contains(base.getType())) {
+            if (isInfectable(base)) {
                 tryInfect(base);
             }
         }
@@ -105,14 +122,12 @@ public class BacteriaManager implements Listener {
             @Override public void run() {
                 if (!running) return;
 
-                // maxActive 제한
                 if (maxActive > 0 && infected.size() >= maxActive) return;
 
-                // 감염원 중 하나를 골라 이웃으로 전파
+                // 감염원 중 하나를 골라 이웃 전파
                 for (int i = 0; i < workPerTick; i++) {
                     if (infected.isEmpty()) break;
 
-                    // 임의의 감염 지점 선택
                     Location src = infected.stream()
                             .skip(random.nextInt(Math.max(1, infected.size())))
                             .findFirst().orElse(null);
@@ -129,10 +144,10 @@ public class BacteriaManager implements Listener {
 
     /** 특정 블록을 감염 시도 */
     private void tryInfect(Block block) {
-        if (!targetBlocks.contains(block.getType())) return;
+        if (!isInfectable(block)) return;
         if (random.nextDouble() >= spreadChance) return;
 
-        block.setType(infectionBlock, true); // 물리/유체 상호작용 유도
+        block.setType(infectionBlock, true);
         Location key = keyOf(block);
         infected.add(key);
 
@@ -146,12 +161,11 @@ public class BacteriaManager implements Listener {
         }, lifetimeTicks);
     }
 
-    /** 6방향 이웃으로 전파 */
+    /** 6방향 이웃 전파 */
     private void spreadFrom(Block src) {
         World w = src.getWorld();
         int x = src.getX(), y = src.getY(), z = src.getZ();
 
-        // 이웃 후보를 랜덤 순서로 섞어서 시도
         int[][] dirs = { {1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,0,1},{0,0,-1} };
         for (int i = 0; i < dirs.length; i++) {
             int j = random.nextInt(dirs.length);
@@ -162,7 +176,7 @@ public class BacteriaManager implements Listener {
             int nx = x + d[0], ny = y + d[1], nz = z + d[2];
             if (ny < w.getMinHeight() || ny >= w.getMaxHeight()) continue;
             Block nb = w.getBlockAt(nx, ny, nz);
-            if (targetBlocks.contains(nb.getType())) {
+            if (isInfectable(nb)) {
                 tryInfect(nb);
             }
         }
@@ -174,7 +188,6 @@ public class BacteriaManager implements Listener {
         if (task != null) task.cancel();
         task = null;
 
-        // 현재 남아있는 감염 블록 원복
         Bukkit.getScheduler().runTask(plugin, () -> {
             for (Location loc : infected) {
                 Block b = loc.getBlock();
