@@ -145,9 +145,6 @@ visuals:
     base-density: 2          # 플레이어당 기본 입자 개수
     per-severity: 8          # severity 1.0에서 추가되는 입자 수
     radius: 6.0              # 플레이어 주변 반경
-  bossbar:
-    enabled: false
-    title: "☼ Solar Severity"
 
 # ─────────────────────────────────────────
 # 기타(추후 확장용)
