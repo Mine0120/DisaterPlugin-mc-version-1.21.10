@@ -4,14 +4,46 @@ max-duration-seconds: 60
 max-blocks-total: 5000
 
 meteor:
-  count: 5
-  explosion-power: 4
+  # 기본
+  count: 3
+  explosion-power: 7          # 1~10 권장 (강력)
   ignite-fire: true
-  spawn-height: 60
-  material: MAGMA_BLOCK
-  fireball-particle: FLAME
+  spawn-height: 70            # 타겟 기준 추가 높이
+  timeout-seconds: 20
+
+  # 외형/코어 (겉 표면 + 내부 코어, 2겹 구)
+  surface-material: MAGMA_BLOCK
+  core-material: DEEPSLATE
+  surface-radius: 2.7
+  core-radius: 1.6
+  surface-pieces: 72          # 구 표면 조밀도 (24~128)
+  core-pieces: 28
+
+  # 낙하 이펙트
+  trail-particle: FLAME
   smoke-particle: LARGE_SMOKE
-  sound: ENTITY_BLAZE_SHOOT
+  trail-density: 2            # 틱당 파티클 수 (1~3)
+  fall-speed: 1.28            # 기본 속도 스케일
+  gravity-bias: -0.27         # 아래쪽으로 끌어내리는 편향
+
+  # 충돌 후 '파편' (잔해로 남는 낙하 블록)
+  debris:
+    count: 35                 # 파편 낙하블록 개수
+    material-1: DEEPSLATE     # 파편 재질 후보 1
+    material-2: MAGMA_BLOCK   # 파편 재질 후보 2
+    material-3: COBBLESTONE   # 파편 재질 후보 3
+    speed-min: 0.55           # 초기 속도 랜덤 범위
+    speed-max: 1.6
+    up-boost: 0.35            # 위로 튀는 힘
+    place-chance: 0.45        # 착지 시 실제 블록으로 남을 확률
+
+  # 충돌 자국(그을음/용암 흔적)
+  scorch:
+    radius: 4                 # 충돌 지점 주변 반경
+    magma-patch-chance: 0.30  # 상단 지형을 MAGMA_BLOCK로 교체하는 확률
+    fire-chance: 0.35         # 상단에 불을 붙일 확률
+    ash-particles: true
+
 
 earthquake:
   radius: 20
@@ -21,9 +53,13 @@ earthquake:
   breakable-depth: 3
 
 bacteria:
-  start-radius: 1
-  tick-interval: 5
-  per-tick: 80
+  infection-block: SCULK       # 감염 시 겉모습(예: SCULK/BLACK_CONCRETE/SLIME_BLOCK 등)
+  replace-after: AIR           # 수명 종료 후 치환(보통 AIR)
+  lifetime-ticks: 200          # 감염 유지 시간 (200틱=10초)
+  tick-interval: 5             # 틱 간격(1틱=0.05s) — 작을수록 빠름/부하↑
+  per-tick: 120                # 틱당 신규 감염 최대 수
+  spread-chance: 0.45          # 이웃 감염 확률(0~1)
+  max-active: 0             # 동시에 존재 가능한 감염 블록 상한(세이프가드)
   target-blocks:
     - GRASS_BLOCK
     - DIRT
@@ -32,7 +68,6 @@ bacteria:
     - GRAVEL
     - DEEPSLATE
     - TUFF
-  replace-with: AIR
 
 doomsday:
   enabled-by-default: false      # 서버 기동 시 자동 시작할지
