@@ -17,9 +17,9 @@ doomsday:
   burn-check-interval: 20
   allow-manual: true
   manual-default: -1.0
-  water: { base: 0.12, exp: 1.1 }
-  trees: { base: 0.10, exp: 1.0 }
-  grass: { base: 0.12, exp: 1.0 }
+  water: { base: 0.32, exp: 1.1 }
+  trees: { base: 0.20, exp: 1.0 }
+  grass: { base: 0.24, exp: 1.0 }
   burn:  { base-dps: 0.6, scale-dps: 1.8 }
 
 # ─────────────────────────────────────────

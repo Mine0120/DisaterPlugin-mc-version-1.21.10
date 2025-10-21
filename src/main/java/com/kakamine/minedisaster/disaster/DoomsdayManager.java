@@ -248,12 +248,8 @@ public class DoomsdayManager {
     /* ---------------- 일광 화상(물 속 면제 + 동물 포함) ---------------- */
     private void applySunburn(World w, double severity) {
         // 플레이어
-        for (Player p : w.getPlayers()) {
-            applySunburnTo(w, p, severity);
-        }
-        // 동물
-        for (org.bukkit.entity.Animals a : w.getEntitiesByClass(org.bukkit.entity.Animals.class)) {
-            applySunburnTo(w, a, severity);
+        for (org.bukkit.entity.LivingEntity e : w.getLivingEntities()) {
+            applySunburnTo(w, e, severity);
         }
     }
 
