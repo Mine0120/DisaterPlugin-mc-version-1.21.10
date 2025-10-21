@@ -4,48 +4,66 @@ max-duration-seconds: 60
 max-blocks-total: 5000
 
 meteor:
+  # 기본
   count: 4
-  explosion-power: 8
+  explosion-power: 12         # 강력. 아래 explosion-max로 상한 제어
+  explosion-max: 20           # 하드 상한(안전장치)
   ignite-fire: true
   spawn-height: 80
+  timeout-seconds: 20
 
   # 랜덤 낙하지역(명령 타겟 주변)
-  random-radius: 18        # 이 반경 내 임의 지점들에 메테오가 소환됨
+  random-radius: 22
 
-  # 외형(더 큼) + 코어
+  # 외형(표면/코어) — ★폭발력에 따라 자동 스케일됨
   surface-material: MAGMA_BLOCK
   core-material: DEEPSLATE
-  surface-radius: 3.4
-  core-radius: 2.1
-  surface-pieces: 96
-  core-pieces: 36
+  base-surface-radius: 3.2     # 폭발력이 0일 때 기준 반경
+  base-core-radius: 2.0
+  radius-scale-per-power: 0.18 # power 1 증가 시 +18% 스케일
 
-  # 낙하 이펙트/속도 랜덤화
+  # 구 밀도(개수가 많을수록 동글하고 무거움)
+  surface-pieces: 110
+  core-pieces: 42
+
+  # 낙하 이펙트/속도
   trail-particle: FLAME
   smoke-particle: LARGE_SMOKE
   trail-density: 2
   fall-speed: 1.35
   gravity-bias: -0.30
-  # 추가: 낙하 방향 분산(도)
-  spread-angle-deg: 10     # 0~25 권장 (0=직진)
+  spread-angle-deg: 12
 
-  timeout-seconds: 20
-
+  # 파편
   debris:
-    count: 45
+    base-count: 45
+    per-power: 2            # power 1마다 +2개
     material-1: DEEPSLATE
     material-2: MAGMA_BLOCK
     material-3: COBBLESTONE
     speed-min: 0.6
-    speed-max: 1.8
-    up-boost: 0.38
+    speed-max: 1.9
+    up-boost: 0.40
     place-chance: 0.55
 
+  # 충돌 자국(그을음/불/마그마 패치)
   scorch:
-    radius: 5
-    magma-patch-chance: 0.35
-    fire-chance: 0.40
+    radius: 6
+    magma-patch-chance: 0.40
+    fire-chance: 0.45
     ash-particles: true
+
+  # ★ 분화구 파기(지형 조각)
+  crater:
+    enabled: true
+    radius-base: 6.0        # power=0일 때 분화구 반경
+    radius-per-power: 1.7   # power 1마다 +반경
+    depth-scale: 0.58       # 반경 * depth-scale = 최대 깊이
+    rim-random: 0.22        # 테두리 요철 랜덤(0~0.5)
+    magma-rim-chance: 0.18  # 림에 마그마로 그을음
+    lava-bottom-chance: 0.38# 바닥 일부 용암 생성
+    smooth: true            # 얕은 단차 매끄럽게
+
 
 
 earthquake:
