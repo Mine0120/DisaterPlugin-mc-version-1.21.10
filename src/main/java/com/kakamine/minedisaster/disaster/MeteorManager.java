@@ -1,7 +1,6 @@
 package com.kakamine.minedisaster.disaster;
 
 import com.kakamine.minedisaster.MineDisaster;
-import com.kakamine.minedisaster.util.BlockUtils;
 import org.bukkit.*;
 import org.bukkit.block.Block;
 import org.bukkit.entity.Entity;
@@ -15,9 +14,6 @@ import org.bukkit.util.Vector;
 
 import java.util.*;
 
-/**
- * 고퀄 메테오(랜덤 낙하 + 대형 이중 구 + 내부 채움 + 파편 + 스코치 + 분화구 + 화염 폭풍 + 폭발력-크기 연동)
- */
 public class MeteorManager implements Listener {
     private final MineDisaster plugin;
     private final Random rnd = new Random();
@@ -27,27 +23,29 @@ public class MeteorManager implements Listener {
     private final Map<UUID, Set<UUID>> meteorParts = new HashMap<>();
     private final Map<UUID, List<BukkitTask>> meteorTasks = new HashMap<>();
 
-    // 파편 추적(착지 점화용)
+    // 파편 추적
     private final Set<UUID> debrisAll = new HashSet<>();
-    private final Set<UUID> debrisIgnite = new HashSet<>();
+
+    // ▶ 성능 상한 / 파티클 빈도
+    private final int MAX_PARTS_PER_METEOR = 220;
+    private final int TRAIL_TICK_PERIOD = 2;
 
     public MeteorManager(MineDisaster plugin) { this.plugin = plugin; }
 
     public void cancelAll() {
         meteorTasks.values().forEach(list -> list.forEach(BukkitTask::cancel));
         meteorTasks.clear();
-        for (UUID partId : new ArrayList<>(partToMeteor.keySet())) {
-            Entity e = Bukkit.getEntity(partId);
-            if (e != null) e.remove();
-        }
-        for (UUID id : new ArrayList<>(debrisAll)) {
+        for (UUID id : new ArrayList<>(partToMeteor.keySet())) {
             Entity e = Bukkit.getEntity(id);
             if (e != null) e.remove();
         }
         partToMeteor.clear();
-        meteorParts.clear();
+        for (UUID id : new ArrayList<>(debrisAll)) {
+            Entity e = Bukkit.getEntity(id);
+            if (e != null) e.remove();
+        }
         debrisAll.clear();
-        debrisIgnite.clear();
+        meteorParts.clear();
     }
 
     public void spawnMeteorShower(World world, Location center, int count, int requestedPower) {
@@ -56,38 +54,46 @@ public class MeteorManager implements Listener {
         final int timeoutSec = Math.max(5, plugin.getConfig().getInt("meteor.timeout-seconds", 20));
         final int randRadius = Math.max(0, plugin.getConfig().getInt("meteor.random-radius", 22));
 
-        // 폭발력(상향 + 상한)
+        // 폭발력
         int maxP = Math.max(10, plugin.getConfig().getInt("meteor.explosion-max", 20));
         int cfgP = plugin.getConfig().getInt("meteor.explosion-power", 12);
         int power = Math.max(1, Math.min((requestedPower > 0 ? requestedPower : cfgP), maxP));
 
         // 재질
-        final Material surfaceMat = materialOr("meteor.surface-material", Material.MAGMA_BLOCK);
-        final Material coreMat    = materialOr("meteor.core-material", Material.DEEPSLATE);
-        final Material fillMat    = materialOr("meteor.fill-material", Material.NETHERRACK);
+        Material surfaceMat = matchMat(plugin.getConfig().getString("meteor.surface-material", "MAGMA_BLOCK"), Material.MAGMA_BLOCK);
+        Material coreMat    = matchMat(plugin.getConfig().getString("meteor.core-material",    "DEEPSLATE"),   Material.DEEPSLATE);
+        Material fillMat    = matchMat(plugin.getConfig().getString("meteor.fill-material",    "NETHERRACK"),  Material.NETHERRACK);
 
-        // 반경(폭발력 스케일)
-        final double baseSurfaceR = Math.max(1.6, plugin.getConfig().getDouble("meteor.base-surface-radius", 3.2));
-        final double baseCoreR    = Math.max(0.9, plugin.getConfig().getDouble("meteor.base-core-radius", 2.0));
-        final double scalePerPow  = Math.max(0.0, plugin.getConfig().getDouble("meteor.radius-scale-per-power", 0.18));
-        final double scale = 1.0 + (power * scalePerPow);
-        final double surfaceR = baseSurfaceR * scale;
-        final double coreR    = baseCoreR * scale;
+        // 반경 스케일
+        double baseSurfaceR = Math.max(1.6, plugin.getConfig().getDouble("meteor.base-surface-radius", 3.2));
+        double baseCoreR    = Math.max(0.9, plugin.getConfig().getDouble("meteor.base-core-radius",    2.0));
+        double scalePerPow  = Math.max(0.0, plugin.getConfig().getDouble("meteor.radius-scale-per-power", 0.18));
+        double scale = 1.0 + (power * scalePerPow);
+        double surfaceR = baseSurfaceR * scale;
+        double coreR    = baseCoreR * scale;
 
         // 밀도
-        final int surfaceN    = Math.max(16, Math.min(plugin.getConfig().getInt("meteor.surface-pieces", 110), 320));
-        final int coreN       = Math.max(8,  Math.min(plugin.getConfig().getInt("meteor.core-pieces", 42), 160));
-        final double fillDensity = Math.max(0.0, plugin.getConfig().getDouble("meteor.fill-density", 2.2));
-        // 내부 파트 수(반경이 커질수록 더 많이): surfaceN * density * (surfaceR / 3.0) 근사
-        final int fillN = (int)Math.round(surfaceN * fillDensity * Math.max(1.0, surfaceR / 3.0));
+        int surfaceN = Math.max(32, Math.min(plugin.getConfig().getInt("meteor.surface-pieces", 80), 320));
+        int coreN    = Math.max(12, Math.min(plugin.getConfig().getInt("meteor.core-pieces",    30), 160));
+        double fillDensity = Math.max(0.0, plugin.getConfig().getDouble("meteor.fill-density", 1.2));
+        int fillN = (int)Math.round(surfaceN * fillDensity * Math.max(1.0, surfaceR / 3.0));
+
+        // 총 파트 상한(동적 다운스케일)
+        int totalParts = surfaceN + coreN + fillN;
+        if (totalParts > MAX_PARTS_PER_METEOR) {
+            double s = MAX_PARTS_PER_METEOR / (double) totalParts;
+            surfaceN = Math.max(32, (int)Math.round(surfaceN * s));
+            coreN    = Math.max(12, (int)Math.round(coreN * s));
+            fillN    = Math.max(16, (int)Math.round(fillN * s));
+        }
 
         // 이펙트/속도
-        final Particle trailP  = Particle.valueOf(plugin.getConfig().getString("meteor.trail-particle", "FLAME"));
-        final Particle smokeP  = Particle.valueOf(plugin.getConfig().getString("meteor.smoke-particle", "LARGE_SMOKE"));
-        final int trailDensity = Math.max(1, Math.min(plugin.getConfig().getInt("meteor.trail-density", 2), 6));
-        final double speed     = plugin.getConfig().getDouble("meteor.fall-speed", 1.35);
-        final double gravBias  = plugin.getConfig().getDouble("meteor.gravity-bias", -0.30);
-        final double spreadDeg = Math.max(0, Math.min(25, plugin.getConfig().getDouble("meteor.spread-angle-deg", 12)));
+        Particle trailP  = Particle.valueOf(plugin.getConfig().getString("meteor.trail-particle", "FLAME"));
+        Particle smokeP  = Particle.valueOf(plugin.getConfig().getString("meteor.smoke-particle", "LARGE_SMOKE"));
+        int trailDensity = Math.max(1, Math.min(plugin.getConfig().getInt("meteor.trail-density", 1), 6));
+        double speed     = plugin.getConfig().getDouble("meteor.fall-speed", 1.35);
+        double gravBias  = plugin.getConfig().getDouble("meteor.gravity-bias", -0.30);
+        double spreadDeg = Math.max(0, Math.min(25, plugin.getConfig().getDouble("meteor.spread-angle-deg", 12)));
 
         for (int i = 0; i < count; i++) {
             // 랜덤 타겟/스폰
@@ -106,14 +112,9 @@ public class MeteorManager implements Listener {
             meteorParts.put(meteorId, new HashSet<>());
             meteorTasks.put(meteorId, new ArrayList<>());
 
-            // 표면/코어
-            for (Vector off : fibonacciSphere(surfaceR, surfaceN)) {
-                spawnMeteorPiece(world, spawn.clone().add(off), surfaceMat, vel, meteorId, trailP, trailDensity);
-            }
-            for (Vector off : fibonacciSphere(coreR, coreN)) {
-                spawnMeteorPiece(world, spawn.clone().add(off), coreMat, vel, meteorId, trailP, trailDensity);
-            }
-            // 내부 채움(랜덤 구체 내 균일 분포)
+            // 표면/코어/내부 채움(솔리드)
+            for (Vector off : fibonacciSphere(surfaceR, surfaceN)) spawnMeteorPiece(world, spawn.clone().add(off), surfaceMat, vel, meteorId, trailP, trailDensity);
+            for (Vector off : fibonacciSphere(coreR, coreN))       spawnMeteorPiece(world, spawn.clone().add(off), coreMat,    vel, meteorId, trailP, trailDensity);
             for (int k = 0; k < fillN; k++) {
                 Vector off = randomPointInSolidSphere(coreR * 0.9 + rnd.nextDouble() * (surfaceR - coreR * 0.9));
                 spawnMeteorPiece(world, spawn.clone().add(off), fillMat, vel, meteorId, trailP, trailDensity);
@@ -121,7 +122,7 @@ public class MeteorManager implements Listener {
 
             world.playSound(spawn, Sound.ENTITY_BLAZE_SHOOT, 1.0f, 0.6f + rnd.nextFloat() * 0.4f);
 
-            // 타임아웃
+            // 타임아웃 강제 폭발
             BukkitTask timeout = Bukkit.getScheduler().runTaskLater(plugin, () -> {
                 if (!meteorParts.containsKey(meteorId)) return;
                 Location avg = averageLocationOfMeteor(meteorId, world, spawn);
@@ -146,8 +147,8 @@ public class MeteorManager implements Listener {
             if (!fb.isValid()) return;
             Location l = fb.getLocation();
             w.spawnParticle(trailP, l, trailDensity, 0, 0, 0, 0);
-            w.spawnParticle(Particle.SMALL_FLAME, l, 1, 0, 0, 0, 0);
-        }, 1L, 1L);
+            if (rnd.nextBoolean()) w.spawnParticle(Particle.SMALL_FLAME, l, 1, 0, 0, 0, 0);
+        }, 1L, TRAIL_TICK_PERIOD);
         meteorTasks.get(meteorId).add(tail);
     }
 
@@ -158,60 +159,53 @@ public class MeteorManager implements Listener {
         UUID pid = fb.getUniqueId();
         UUID meteorId = partToMeteor.get(pid);
 
-        // 파편(FallingBlock)이 착지한 경우: 불 붙이기(확률)
+        // 파편은 기본 동작 허용 후 착지 점화 처리
         if (meteorId == null && debrisAll.contains(pid)) {
-            // 기본 동작(블록으로 변환)은 허용
             Bukkit.getScheduler().runTask(plugin, () -> {
-                Block placed = e.getBlock(); // 방금 바뀐 블록
+                Block placed = e.getBlock();
                 if (!placed.getType().isAir()) {
                     double igniteChance = plugin.getConfig().getDouble("meteor.debris.ignite-on-land-chance", 0.55);
                     double toNeth = plugin.getConfig().getDouble("meteor.debris.turn-to-netherrack-chance", 0.25);
-                    if (rnd.nextDouble() < toNeth && placed.getType() != Material.BEDROCK) {
-                        placed.setType(Material.NETHERRACK, true);
-                    }
+                    if (rnd.nextDouble() < toNeth && placed.getType() != Material.BEDROCK) placed.setType(Material.NETHERRACK, true);
                     if (rnd.nextDouble() < igniteChance) {
                         Block up = placed.getRelative(0,1,0);
                         if (up.getType().isAir()) up.setType(Material.FIRE, true);
                     }
                 }
                 debrisAll.remove(pid);
-                debrisIgnite.remove(pid);
             });
             return;
         }
 
-        // 메테오 본체 파트: 블록으로 변하지 않게 하고 즉시 폭발 처리
+        // 메테오 본체: 블록으로 변환 취소 + 즉시 폭발
         if (meteorId != null) {
             e.setCancelled(true);
             Location impact = e.getBlock().getLocation().add(0.5, 0.0, 0.5);
 
-            final boolean ignite = plugin.getConfig().getBoolean("meteor.ignite-fire", true);
+            boolean ignite = plugin.getConfig().getBoolean("meteor.ignite-fire", true);
             int cfgP = plugin.getConfig().getInt("meteor.explosion-power", 12);
             int maxP = Math.max(10, plugin.getConfig().getInt("meteor.explosion-max", 20));
             int power = Math.max(1, Math.min(cfgP, maxP));
+            Particle smokeP = Particle.valueOf(plugin.getConfig().getString("meteor.smoke-particle", "LARGE_SMOKE"));
 
-            final Particle smokeP = Particle.valueOf(plugin.getConfig().getString("meteor.smoke-particle", "LARGE_SMOKE"));
             triggerExplosionAndAftereffects(meteorId, impact, power, ignite, smokeP);
         }
     }
 
-    /** 폭발 + 스코치 + 분화구 + 파편 + 화염 폭풍 + 정리 */
     private void triggerExplosionAndAftereffects(UUID meteorId, Location loc, int power, boolean ignite, Particle smokeP) {
         World w = loc.getWorld();
         if (w != null) {
-            // 폭발
             w.spawnParticle(Particle.EXPLOSION_EMITTER, loc, 1);
             w.createExplosion(loc, power, ignite, true);
-            w.spawnParticle(smokeP, loc, 200, 3.0, 2.0, 3.0, 0.045);
+            w.spawnParticle(smokeP, loc, 140, 3.0, 2.0, 3.0, 0.045);
 
-            // 충격파
+            // 플레이어 충격파
             for (Player pl : w.getPlayers()) {
                 double d2 = pl.getLocation().distanceSquared(loc);
                 if (d2 <= 80 * 80) {
                     Vector push = pl.getLocation().toVector().subtract(loc.toVector()).normalize().multiply(0.70);
                     push.setY(0.42);
                     pl.setVelocity(pl.getVelocity().add(push));
-                    pl.spawnParticle(Particle.SONIC_BOOM, pl.getLocation(), 1);
                     w.playSound(pl, Sound.ENTITY_GENERIC_EXPLODE, 1.0f, 0.75f);
                 }
             }
@@ -221,47 +215,35 @@ public class MeteorManager implements Listener {
 
             // 분화구
             double craterR = 0;
-            if (plugin.getConfig().getBoolean("meteor.crater.enabled", true)) {
-                craterR = carveCrater(w, loc, power);
-            }
+            if (plugin.getConfig().getBoolean("meteor.crater.enabled", true)) craterR = carveCrater(w, loc, power);
 
-            // 파편(폭발력 비례)
+            // 파편
             spawnDebris(w, loc, power);
 
-            // ★ 화염 폭풍(주변에 불을 대량으로 남김)
-            if (plugin.getConfig().getBoolean("meteor.postfire.enabled", true)) {
-                firestorm(w, loc, power, craterR);
-            }
+            // 화염 폭풍(주변 대량 점화)
+            if (plugin.getConfig().getBoolean("meteor.postfire.enabled", true)) firestorm(w, loc, power, craterR);
         }
 
-        // 엔티티/태스크 정리
+        // 정리
         Set<UUID> parts = meteorParts.remove(meteorId);
-        if (parts != null) {
-            for (UUID pid : parts) {
-                Entity e = Bukkit.getEntity(pid);
-                if (e != null) e.remove();
-                partToMeteor.remove(pid);
-            }
-        }
+        if (parts != null) for (UUID pid : parts) { Entity e = Bukkit.getEntity(pid); if (e != null) e.remove(); partToMeteor.remove(pid); }
         List<BukkitTask> tasks = meteorTasks.remove(meteorId);
         if (tasks != null) tasks.forEach(BukkitTask::cancel);
     }
 
-    /** 파편: 폭발력 비례 수량, 일부는 나중에 착지하며 점화 */
     private void spawnDebris(World w, Location origin, int power) {
         int base = Math.max(0, plugin.getConfig().getInt("meteor.debris.base-count", 45));
         int perP = Math.max(0, plugin.getConfig().getInt("meteor.debris.per-power", 2));
         int count = base + perP * Math.max(0, power);
         if (count == 0) return;
 
-        Material m1 = materialOr("meteor.debris.material-1", Material.DEEPSLATE);
-        Material m2 = materialOr("meteor.debris.material-2", Material.MAGMA_BLOCK);
-        Material m3 = materialOr("meteor.debris.material-3", Material.COBBLESTONE);
+        Material m1 = matchMat(plugin.getConfig().getString("meteor.debris.material-1","DEEPSLATE"), Material.DEEPSLATE);
+        Material m2 = matchMat(plugin.getConfig().getString("meteor.debris.material-2","MAGMA_BLOCK"), Material.MAGMA_BLOCK);
+        Material m3 = matchMat(plugin.getConfig().getString("meteor.debris.material-3","COBBLESTONE"), Material.COBBLESTONE);
 
         double vMin = plugin.getConfig().getDouble("meteor.debris.speed-min", 0.6);
         double vMax = plugin.getConfig().getDouble("meteor.debris.speed-max", 1.9);
         double up   = plugin.getConfig().getDouble("meteor.debris.up-boost", 0.40);
-        double placeChance = plugin.getConfig().getDouble("meteor.debris.place-chance", 0.55);
 
         for (int i = 0; i < count; i++) {
             Material mat = switch (rnd.nextInt(3)) { case 0 -> m1; case 1 -> m2; default -> m3; };
@@ -273,18 +255,11 @@ public class MeteorManager implements Listener {
             dir.setY(Math.abs(dir.getY()) + up);
             fb.setVelocity(dir);
 
-            UUID id = fb.getUniqueId();
-            debrisAll.add(id);
-            boolean keep = rnd.nextDouble() < placeChance;
-            if (!keep) {
-                Bukkit.getScheduler().runTaskLater(plugin, () -> { if (fb.isValid()) fb.remove(); debrisAll.remove(id); }, 20L * (6 + rnd.nextInt(4)));
-            } else {
-                debrisIgnite.add(id);
-            }
+            debrisAll.add(fb.getUniqueId());
+            Bukkit.getScheduler().runTaskLater(plugin, () -> { if (fb.isValid()) fb.remove(); debrisAll.remove(fb.getUniqueId()); }, 20L * (6 + rnd.nextInt(4)));
         }
     }
 
-    /** 화염 폭풍: 분화구 반경 또는 스코치 반경 기준으로 주변에 불을 대량 점화 */
     private void firestorm(World w, Location center, int power, double craterRadius) {
         double mult = plugin.getConfig().getDouble("meteor.postfire.radius-multiplier", 1.3);
         int attempts = Math.max(0, plugin.getConfig().getInt("meteor.postfire.attempts", 260));
@@ -306,16 +281,13 @@ public class MeteorManager implements Listener {
 
             Block up = top.getRelative(0,1,0);
             if (up.getType().isAir()) {
-                if (rnd.nextDouble() < nethChance && top.getType() != Material.BEDROCK) {
-                    top.setType(Material.NETHERRACK, true);
-                }
+                if (rnd.nextDouble() < nethChance && top.getType() != Material.BEDROCK) top.setType(Material.NETHERRACK, true);
                 up.setType(Material.FIRE, true);
             }
             w.spawnParticle(Particle.ASH, up.getLocation().add(0.5,0.2,0.5), 2, 0.1,0.1,0.1, 0);
         }
     }
 
-    /** 분화구 생성. 반환값: 분화구 반경 */
     private double carveCrater(World w, Location center, int power) {
         double rBase = plugin.getConfig().getDouble("meteor.crater.radius-base", 6.0);
         double rPerP = plugin.getConfig().getDouble("meteor.crater.radius-per-power", 1.7);
@@ -344,7 +316,7 @@ public class MeteorManager implements Listener {
 
                 for (int dy = 0; dy < depthHere; dy++) {
                     Block b = w.getBlockAt(x, topY - dy, z);
-                    if (!BlockUtils.canBreak(b.getType())) continue;
+                    if (b.getType() == Material.BEDROCK) continue;
                     b.setType(Material.AIR, true);
                 }
 
@@ -383,16 +355,12 @@ public class MeteorManager implements Listener {
                 Block top = w.getBlockAt(x, y, z);
                 if (!isExposedToSky(top)) continue;
 
-                if (rnd.nextDouble() < patchChance) {
-                    if (top.getType() != Material.BEDROCK) top.setType(Material.MAGMA_BLOCK, true);
-                }
+                if (rnd.nextDouble() < patchChance && top.getType() != Material.BEDROCK) top.setType(Material.MAGMA_BLOCK, true);
                 if (rnd.nextDouble() < fireChance) {
                     Block up = top.getRelative(0, 1, 0);
                     if (up.getType().isAir()) up.setType(Material.FIRE, true);
                 }
-                if (ash) {
-                    w.spawnParticle(Particle.ASH, top.getLocation().add(0.5, 1.0, 0.5), 3, 0.3, 0.2, 0.3, 0.0);
-                }
+                if (ash) w.spawnParticle(Particle.ASH, top.getLocation().add(0.5, 1.0, 0.5), 3, 0.3, 0.2, 0.3, 0.0);
             }
         }
     }
@@ -413,16 +381,11 @@ public class MeteorManager implements Listener {
         return v;
     }
 
-    /** 구체 내부 균일 분포(반경 가중 r^(1/3)) */
     private Vector randomPointInSolidSphere(double maxR) {
-        double u = rnd.nextDouble();
-        double v = rnd.nextDouble();
-        double w = rnd.nextDouble();
-
+        double u = rnd.nextDouble(), v = rnd.nextDouble(), w = rnd.nextDouble();
         double theta = 2 * Math.PI * u;
         double phi = Math.acos(2 * v - 1);
         double r = Math.cbrt(w) * maxR;
-
         double sx = r * Math.sin(phi) * Math.cos(theta);
         double sy = r * Math.cos(phi);
         double sz = r * Math.sin(phi) * Math.sin(theta);
@@ -430,8 +393,7 @@ public class MeteorManager implements Listener {
     }
 
     private Vector randomUnitHemisphere() {
-        double u = rnd.nextDouble();
-        double v = rnd.nextDouble();
+        double u = rnd.nextDouble(), v = rnd.nextDouble();
         double theta = 2 * Math.PI * u;
         double z = v; // 0..1
         double r = Math.sqrt(Math.max(0, 1 - z * z));
@@ -468,12 +430,10 @@ public class MeteorManager implements Listener {
         return new Location(w==null?fallbackWorld:w, x/n, y/n, z/n);
     }
 
-    private Material materialOr(String key, Material fallback) {
-        String name = plugin.getConfig().getString(key, fallback.name());
+    private Material matchMat(String name, Material fallback) {
         Material m = Material.matchMaterial(name);
         return m == null ? fallback : m;
     }
-
     private boolean isExposedToSky(Block b) {
         World w = b.getWorld();
         int highest = w.getHighestBlockYAt(b.getX(), b.getZ());

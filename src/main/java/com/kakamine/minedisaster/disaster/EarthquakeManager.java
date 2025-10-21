@@ -1,81 +1,108 @@
 package com.kakamine.minedisaster.disaster;
 
 import com.kakamine.minedisaster.MineDisaster;
-import com.kakamine.minedisaster.util.BlockUtils;
 import org.bukkit.*;
 import org.bukkit.block.Block;
 import org.bukkit.entity.Player;
-import org.bukkit.scheduler.BukkitTask;
-import org.bukkit.util.Vector;
+import org.bukkit.scheduler.BukkitRunnable;
 
-import java.util.*;
+import java.util.Random;
 
 public class EarthquakeManager {
     private final MineDisaster plugin;
-    private final Set<BukkitTask> tasks = new HashSet<>();
-    private final Random rnd = new Random();
+    private BukkitRunnable task;
+    private final Random random = new Random();
+    private boolean running = false;
 
-    public EarthquakeManager(MineDisaster plugin) { this.plugin = plugin; }
-
-    public void cancelAll() {
-        tasks.forEach(BukkitTask::cancel);
-        tasks.clear();
+    public EarthquakeManager(MineDisaster plugin) {
+        this.plugin = plugin;
     }
 
-    public void startEarthquake(Location center, int radius, int seconds) {
+    /** 지진 시작 */
+    public void start(Location center, double magnitude, int radius, int durationSec) {
+        if (running) {
+            plugin.getLogger().warning("지진이 이미 발생 중입니다!");
+            return;
+        }
+        running = true;
         World w = center.getWorld();
-        if (w == null) return;
 
-        double fissureChance = plugin.getConfig().getDouble("earthquake.fissure-chance", 0.15);
-        double knock = plugin.getConfig().getDouble("earthquake.knock-strength", 0.7);
-        int depth = plugin.getConfig().getInt("earthquake.breakable-depth", 3);
+        task = new BukkitRunnable() {
+            int ticks = 0;
+            final int duration = Math.max(1, durationSec) * 20;
 
-        final int[] ticksLeft = { seconds * 20 };
-
-        BukkitTask t = Bukkit.getScheduler().runTaskTimer(plugin, () -> {
-            if (ticksLeft[0] <= 0) {
-                cancelAll();
-                return;
-            }
-            ticksLeft[0] -= 6;
-
-            // 효과음/파티클
-            w.playSound(center, Sound.ENTITY_WARDEN_SONIC_BOOM, 0.5f, 0.5f + rnd.nextFloat()*0.3f);
-            w.spawnParticle(Particle.BLOCK, center, 50, radius, 0.5, radius, 0, Material.STONE.createBlockData());
-
-            // 플레이어 흔들기
-            for (Player p : w.getPlayers()) {
-                if (p.getLocation().distanceSquared(center) <= radius*radius) {
-                    Vector v = new Vector((rnd.nextDouble()-0.5)*knock, 0.12, (rnd.nextDouble()-0.5)*knock);
-                    p.setVelocity(p.getVelocity().add(v));
-                    p.spawnParticle(Particle.SWEEP_ATTACK, p.getLocation(), 2);
+            @Override
+            public void run() {
+                if (ticks >= duration) {
+                    stopAll();
+                    cancel();
+                    return;
                 }
-            }
 
-            // 균열 생성 + 지면 파괴
-            for (int i=0;i<Math.max(4, radius/2);i++) {
-                double ang = rnd.nextDouble()*Math.PI*2;
-                int len = 3 + rnd.nextInt(Math.max(3, radius/3));
-                Location cur = center.clone();
-                for (int j=0;j<len;j++) {
-                    cur.add(Math.cos(ang), 0, Math.sin(ang));
-                    Block top = BlockUtils.getTopSolidOrLiquidBlock(w, cur.getBlockX(), cur.getBlockZ(), center.getY()+5);
-                    if (top == null) continue;
+                // 플레이어 흔들기/효과
+                for (Player p : w.getPlayers()) {
+                    double dist = p.getLocation().distance(center);
+                    if (dist > radius) continue;
 
-                    if (rnd.nextDouble() < fissureChance) {
-                        for (int d=0; d<depth; d++) {
-                            Block b = w.getBlockAt(top.getX(), top.getY()-d, top.getZ());
-                            if (BlockUtils.canBreak(b.getType())) {
-                                w.spawnParticle(Particle.BLOCK, b.getLocation().add(0.5,0.5,0.5), 8, 0.2,0.2,0.2, 0, b.getBlockData());
-                                b.setType(Material.AIR, true);
-                            }
-                        }
-                        w.playSound(top.getLocation(), Sound.BLOCK_DEEPSLATE_BREAK, 0.7f, 0.6f + rnd.nextFloat()*0.4f);
+                    double strength = Math.max(0.1, (1.0 - dist / radius)) * magnitude;
+
+                    // 살짝 흔들기 (TP 과도 시 서버 경고가 날 수 있어 너무 큰 값은 피함)
+                    if (strength > 0.2) {
+                        Location loc = p.getLocation();
+                        double dx = (random.nextDouble() - 0.5) * strength * 0.15;
+                        double dz = (random.nextDouble() - 0.5) * strength * 0.15;
+                        loc.add(dx, 0, dz);
+                        p.teleport(loc);
+                    }
+
+                    // 소리
+                    if (random.nextDouble() < 0.2) {
+                        w.playSound(p.getLocation(), Sound.ENTITY_GENERIC_EXPLODE, 0.4f, 0.8f);
+                    }
+                    // 파티클: BLOCK (구 BLOCK_CRACK 대체)
+                    if (random.nextDouble() < 0.35) {
+                        Location l = p.getLocation().clone().add(0, 0.1, 0);
+                        w.spawnParticle(
+                                Particle.BLOCK,                 // ✅ BLOCK_CRACK 대체
+                                l,
+                                8,                               // count
+                                1.0, 0.1, 1.0,                   // offsets
+                                0.0,                             // extra/speed
+                                Material.STONE.createBlockData() // ✅ BlockData 필수
+                        );
                     }
                 }
-            }
-        }, 0L, 6L);
 
-        tasks.add(t);
+                // 주기적으로 지표 약간 붕괴
+                if (ticks % 20 == 0) {
+                    int attempts = Math.max(1, (int) Math.round(magnitude * 3));
+                    for (int i = 0; i < attempts; i++) {
+                        int dx = random.nextInt(radius * 2) - radius;
+                        int dz = random.nextInt(radius * 2) - radius;
+                        Location l = center.clone().add(dx, 0, dz);
+                        int y = w.getHighestBlockYAt(l);
+                        Block b = w.getBlockAt(l.getBlockX(), Math.max(w.getMinHeight(), y - 1), l.getBlockZ());
+                        if (b.getType().isSolid() && random.nextDouble() < 0.25 && b.getType() != Material.BEDROCK) {
+                            b.setType(Material.AIR, true);
+                            w.spawnParticle(Particle.CLOUD, b.getLocation().add(0.5, 1, 0.5), 10, 0.3, 0.3, 0.3, 0.0);
+                        }
+                    }
+                }
+
+                ticks += 2; // 2틱 주기
+            }
+        };
+        task.runTaskTimer(plugin, 0L, 2L);
+        plugin.getLogger().info("지진 시작: m=" + magnitude + ", r=" + radius + ", t=" + durationSec + "s");
     }
+
+    /** 지진 정지 */
+    public void stopAll() {
+        running = false;
+        if (task != null) task.cancel();
+        task = null;
+        plugin.getLogger().info("지진 종료");
+    }
+
+    public boolean isRunning() { return running; }
 }

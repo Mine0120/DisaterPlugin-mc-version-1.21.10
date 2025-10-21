@@ -10,30 +10,17 @@
 # 지구 멸망(태양 강화) - Doomsday
 # ─────────────────────────────────────────
 doomsday:
-  enabled: true
-  start-after-days: 0         # 몇 '날' 뒤부터 시작할지
-  base-severity: 0.0          # 시작 강도
-  growth-per-day: 0.12        # 날이 지날 때마다 강도 증가량 (0~1 도달까지 속도)
-  tick-interval: 10           # 틱 간격(10 = 0.5초마다 처리)
-  samples-per-tick: 250       # 매 틱 샘플링할 지점 수(부하 조절)
-
-  # 수동 강도 제어
+  tick-interval: 20
+  samples-per-tick: 80
+  scan-radius-chunks: 6
+  max-updates-per-tick: 80
+  burn-check-interval: 20
   allow-manual: true
-  manual-default: -1.0        # -1.0: 자동 모드. (0.0~1.0) 지정 시 시작부터 고정
-
-  # 현상 확률/강도(모두 severity로 스케일됨)
-  water:
-    base: 0.08                # 물 증발 기본률
-    exp: 1.2
-  trees:
-    base: 0.05                # 나무/잎 불붙는 기본률
-    exp: 1.1
-  grass:
-    base: 0.06                # 잔디 → 흙
-    exp: 1.0
-  burn:
-    base-dps: 0.5             # 일광 화상 기본 초당 피해
-    scale-dps: 2.0            # severity 1.0일 때 추가 초당 피해
+  manual-default: -1.0
+  water: { base: 0.12, exp: 1.1 }
+  trees: { base: 0.10, exp: 1.0 }
+  grass: { base: 0.12, exp: 1.0 }
+  burn:  { base-dps: 0.6, scale-dps: 1.8 }
 
 # ─────────────────────────────────────────
 # 박테리아 확산
@@ -43,8 +30,8 @@ bacteria:
   replace-after: AIR           # 수명 끝나면 치환
   lifetime-ticks: 200          # 감염 유지 시간(틱)
   tick-interval: 5             # 스케줄 간격(틱)
-  per-tick: 120                # 틱당 신규 감염 최대 수
-  spread-chance: 0.45          # 이웃 감염 확률(0~1)
+  per-tick: 200                # 틱당 신규 감염 최대 수
+  spread-chance: 0.7          # 이웃 감염 확률(0~1)
   max-active: 0                # <= 0 이면 동시 활성 무제한(끝까지 퍼짐)
   target-blocks:               # 감염 가능한 원래 지형
     - GRASS_BLOCK
@@ -54,44 +41,38 @@ bacteria:
     - GRAVEL
     - DEEPSLATE
     - TUFF
+    - DIRT_PATH
+    - GRANITE
+    - COAL_ORE
+    - COPPER_ORE
+    - IRON_ORE
 
 # ─────────────────────────────────────────
 # 메테오 (랜덤 낙하 + 이중 구 + 내부 채움 + 분화구 + 화염폭풍)
 # ─────────────────────────────────────────
+
 meteor:
-  # 기본/동작
-  count: 4
-  explosion-power: 12          # 요청이 없으면 이것 사용
-  explosion-max: 20            # 하드 상한(명령 인자도 이 값 초과 불가)
+  explosion-power: 12
+  explosion-max: 20
   ignite-fire: true
   spawn-height: 80
   timeout-seconds: 20
-  random-radius: 22            # 명령 타겟 주변 랜덤 반경
-
-  # 구 반경(폭발력 스케일)
+  random-radius: 22
   surface-material: MAGMA_BLOCK
   core-material: DEEPSLATE
+  fill-material: NETHERRACK
   base-surface-radius: 3.2
   base-core-radius: 2.0
-  radius-scale-per-power: 0.18 # power 1 증가당 +18% 스케일
-
-  # 구 밀도(표면/코어 파트 수)
-  surface-pieces: 110
-  core-pieces: 42
-
-  # 내부 채움(솔리드 볼 느낌)
-  fill-density: 2.2            # 내부 파트 수 = surface-pieces * density * 반경보정
-  fill-material: NETHERRACK
-
-  # 낙하 이펙트/속도
+  radius-scale-per-power: 0.18
+  surface-pieces: 80
+  core-pieces: 30
+  fill-density: 1.2
   trail-particle: FLAME
   smoke-particle: LARGE_SMOKE
-  trail-density: 2
+  trail-density: 1
   fall-speed: 1.35
   gravity-bias: -0.30
   spread-angle-deg: 12
-
-  # 파편(폭발력 비례) + 착지 점화
   debris:
     base-count: 45
     per-power: 2
@@ -102,17 +83,13 @@ meteor:
     speed-max: 1.9
     up-boost: 0.40
     place-chance: 0.55
-    ignite-on-land-chance: 0.55       # 파편이 놓인 위치에 불 붙일 확률
-    turn-to-netherrack-chance: 0.25   # 착지 블록을 네더랙으로 바꾸고 불 붙임
-
-  # 충돌 자국(그을음/불/마그마 패치)
+    ignite-on-land-chance: 0.55
+    turn-to-netherrack-chance: 0.25
   scorch:
     radius: 6
     magma-patch-chance: 0.40
     fire-chance: 0.45
     ash-particles: true
-
-  # 분화구 파기(지형 조각)
   crater:
     enabled: true
     radius-base: 6.0
@@ -122,29 +99,15 @@ meteor:
     magma-rim-chance: 0.18
     lava-bottom-chance: 0.38
     smooth: true
-
-  # 폭발 후 화염 폭풍(주변에 불 대량 생성)
   postfire:
     enabled: true
-    radius-multiplier: 1.3     # 분화구 반경 * 이 값(분화구 off면 scorch.radius 사용)
-    attempts: 260              # 점화 시도 횟수
+    radius-multiplier: 1.3
+    attempts: 260
     sky-only: true
     netherrack-chance: 0.12
 
 visuals:
-  enabled: true
-  tick-interval: 20         # 20틱=1초마다 비주얼 업데이트
-  lock-sunset: true          # 해질녘 하늘 고정
-  sunset-time: 12300         # 12000~13000 주변(주황/붉은 하늘)
-  storm:
-    enabled: true
-    min-chance: 0.05         # severity 0일 때 비/천둥 확률
-    max-chance: 0.50         # severity 1일 때 확률
-  ash:
-    enabled: true
-    base-density: 2          # 플레이어당 기본 입자 개수
-    per-severity: 8          # severity 1.0에서 추가되는 입자 수
-    radius: 6.0              # 플레이어 주변 반경
+  enabled: false
 
 # ─────────────────────────────────────────
 # 기타(추후 확장용)
