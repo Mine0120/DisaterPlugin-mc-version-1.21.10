@@ -1,0 +1,67 @@
+# 안전 상한
+max-radius: 64
+max-duration-seconds: 60
+max-blocks-total: 5000
+
+meteor:
+  count: 5
+  explosion-power: 4
+  ignite-fire: true
+  spawn-height: 60
+  material: MAGMA_BLOCK
+  fireball-particle: FLAME
+  smoke-particle: LARGE_SMOKE
+  sound: ENTITY_BLAZE_SHOOT
+
+earthquake:
+  radius: 20
+  seconds: 10
+  fissure-chance: 0.15
+  knock-strength: 0.7
+  breakable-depth: 3
+
+bacteria:
+  start-radius: 1
+  tick-interval: 5
+  per-tick: 80
+  target-blocks:
+    - GRASS_BLOCK
+    - DIRT
+    - STONE
+    - SAND
+    - GRAVEL
+    - DEEPSLATE
+    - TUFF
+  replace-with: AIR
+
+doomsday:
+  enabled-by-default: false      # 서버 기동 시 자동 시작할지
+  tick-interval: 40              # 틱 간격(= 2초) ; 값이 작을수록 강함/부하↑
+  scan-radius: 16                # 플레이어 주변 스캔 반경(블록)
+  attempts-per-player: 64        # 틱마다 샘플링 시도 횟수(퍼포먼스 조절용)
+  affects-overworld-only: true   # true면 오버월드만, false면 모든 월드
+
+  # ‘태양 강도’ 스케일링 (일수가 지날수록 확률↑)
+  base-day-power: 0              # 시작 일(power) 기본값
+  power-per-day: 1               # 일 1일 지날 때마다 power +1
+  world-time-based: true         # true면 월드 day 카운트를 사용, false면 시작 후 경과일
+
+  # 각 효과의 (확률/천) = min(base + power*inc, cap)
+  water-evaporate:
+    base: 2
+    inc: 1
+    cap: 50
+  grass-decay:
+    base: 5
+    inc: 2
+    cap: 80
+  tree-ignite:
+    base: 0
+    inc: 1
+    cap: 25
+
+  # 플레이어 일광화상
+  player-sunburn:
+    fire-seconds-base: 2         # 불붙는 기본 초
+    fire-seconds-per-power: 1    # power 1마다 +초
+    damage-if-under-sun: false   # true면 추가 데미지도 부여(불 외에)

@@ -1,0 +1,21 @@
+name: MineDisaster
+main: com.kakamine.minedisaster.MineDisaster
+version: 1.1.0
+api-version: '1.21'
+authors: [ "kakamine" ]
+description: Meteor, Earthquake, Bacteria and Doomsday (sun apocalypse) for Spigot 1.21.x
+commands:
+  disaster:
+    description: Manage disasters (meteor/quake/bacteria/doomsday)
+    usage: |
+      /disaster meteor [count] [power]
+      /disaster quake [radius] [seconds]
+      /disaster bacteria [startRadius] [perTick] [maxBlocks]
+      /disaster doomsday <start|stop|status> [radius]
+      /disaster stop <meteor|quake|bacteria|doomsday|all>
+      /disaster status
+    aliases: [ md, mdisaster ]
+    permission: minedisasters.use
+permissions:
+  minedisasters.use:
+    default: op
