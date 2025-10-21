@@ -17,16 +17,28 @@ public class DoomsdayManager {
     private double baseSeverity, growthPerDay;
     private boolean allowManual;
 
-    // 성능/스캔
+    private boolean roll(double p) {
+        if (p <= 0) return false;
+        if (p >= 1) return true;
+        return rnd.nextDouble() < p; // rnd는 클래스 상단에 있는 Random 필드입니다.
+    }
+
+    // 스캔/성능
     private int scanRadiusChunks = 6;
     private int maxUpdatesPerTick = 80;
     private int burnCheckInterval = 20;
 
-    // 수동
+    // 수동 강도
     private boolean manualMode = false;
     private double manualSeverity = 0.0;
 
     private int tickCount = 0;
+
+    // ── 물 증발 가속 파라미터(없으면 기본값 사용)
+    private double waterSpeedMult = 2.5;  // 증발 확률 배수
+    private int waterMaxSteps = 4;        // 한 샘플에서 최대 제거 블록 수
+    private int waterExtraDepth = 2;      // 표면 아래로 더 파고들 깊이
+    private int waterLateralTries = 2;    // 표면 동일 Y에서 옆으로 퍼져 제거 시도
 
     public DoomsdayManager(MineDisaster plugin) {
         this.plugin = plugin;
@@ -46,6 +58,12 @@ public class DoomsdayManager {
         scanRadiusChunks   = Math.max(2,  plugin.getConfig().getInt("doomsday.scan-radius-chunks", 6));
         maxUpdatesPerTick  = Math.max(10, plugin.getConfig().getInt("doomsday.max-updates-per-tick", 80));
         burnCheckInterval  = Math.max(5,  plugin.getConfig().getInt("doomsday.burn-check-interval", 20));
+
+        // 물 증발 가속 옵션(없으면 기본값 유지)
+        waterSpeedMult   = Math.max(0.1, plugin.getConfig().getDouble("doomsday.water.speed-mult", 2.5));
+        waterMaxSteps    = Math.max(1,   plugin.getConfig().getInt("doomsday.water.max-steps", 4));
+        waterExtraDepth  = Math.max(0,   plugin.getConfig().getInt("doomsday.water.extra-depth", 2));
+        waterLateralTries= Math.max(0,   plugin.getConfig().getInt("doomsday.water.lateral-tries", 2));
     }
 
     public void start() { stop(); task = Bukkit.getScheduler().runTaskTimer(plugin, this::tick, 0L, tickInterval); }
@@ -109,104 +127,106 @@ public class DoomsdayManager {
                 }
             }
 
-            // ▶ 플레이어/동물 일광 화상
+            // ▶ 모든 생명체 일광 화상(물속 면제)
             if ((tickCount % Math.max(1, burnCheckInterval)) == 0) {
                 applySunburn(w, sev);
             }
         }
     }
 
-    /* ---------------- 표면 효과 (잔디/눈/물/나무) ---------------- */
+    /* ---------------- 표면 효과 (잔디/눈/물/나무/목조물) ---------------- */
 
     private int applySurfaceEffects(World w, Block top, double severity) {
-        // 표면 블록과 그 위의 블록
         Material type = top.getType();
         Block above = top.getRelative(0, 1, 0);
         Material aboveType = above.getType();
 
-        // 1) 물 증발 (표면 물 + 살짝 아래까지 단계적으로)
+        // 1) 물 증발 (강화판)
         if (isWater(type) || isWater(aboveType)) {
             int evaporated = evaporateWaterColumn(w, top.getX(), top.getY(), top.getZ(), severity);
-            if (evaporated > 0) return evaporated; // 한 칸이라도 증발했으면 이번 샘플 종료
+            if (evaporated > 0) return evaporated;
         }
 
-        // 2) 눈 녹이기 (눈 레이어/눈 블록/가루눈 제거)
+        // 2) 눈 녹이기
         if (isSnow(aboveType)) {
-            if (roll(meltChance(severity))) {
-                above.setType(Material.AIR, true);
-                return 1;
-            }
+            if (roll(meltChance(severity))) { above.setType(Material.AIR, true); return 1; }
         }
         if (isSnow(type)) {
-            if (roll(meltChance(severity))) {
-                top.setType(Material.AIR, true);
-                return 1;
-            }
+            if (roll(meltChance(severity))) { top.setType(Material.AIR, true); return 1; }
         }
 
-        // 3) 잔디 → 흙(되돌림 방지용 Coarse Dirt), 위 식생/눈 동시 제거
+        // 3) 잔디 → COARSE_DIRT (재확산 방지) + 위 식생/눈 제거
         if (type == Material.GRASS_BLOCK) {
             if (roll(grassDecayChance(severity))) {
-                if (isVegetation(aboveType) || isSnow(aboveType)) {
-                    above.setType(Material.AIR, true); // 위에 얹힌 것 제거
-                }
-                top.setType(Material.COARSE_DIRT, true); // 잔디 재확산 방지
+                if (isVegetation(aboveType) || isSnow(aboveType)) { above.setType(Material.AIR, true); }
+                top.setType(Material.COARSE_DIRT, true);
                 return 1;
             }
         }
 
-        // 4) 나무/잎 점화
+        // 4) 나무(통나무/잎) 점화
         if (isTree(type)) {
             if (roll(treeIgniteChance(severity))) {
-                Block up = top.getRelative(0, 1, 0);
-                if (up.getType().isAir()) {
-                    up.setType(Material.FIRE, true);
-                    return 1;
-                }
+                if (tryIgniteAround(top)) return 1;
+            }
+        }
+
+        // 5) 목재 구조물(판자/계단/슬랩/울타리/문/트랩도어/간판/책장/상자 등) 점화
+        if (isWoodenBlock(type)) {
+            if (roll(treeIgniteChance(severity))) { // 같은 확률 재활용(원하면 config 분리 가능)
+                if (tryIgniteAround(top)) return 1;
             }
         }
 
         return 0;
     }
 
-    // 물 증발 확률
+    // ── 확률 함수들
     private double evaporateChance(double sev) {
         double base = plugin.getConfig().getDouble("doomsday.water.base", 0.12);
         double exp  = plugin.getConfig().getDouble("doomsday.water.exp", 1.1);
-        return Math.pow(sev, exp) * base;
+        return Math.pow(sev, exp) * base * waterSpeedMult; // ★ 가속 배수 적용
     }
-    // 잔디 소멸 확률
     private double grassDecayChance(double sev) {
         double base = plugin.getConfig().getDouble("doomsday.grass.base", 0.12);
         double exp  = plugin.getConfig().getDouble("doomsday.grass.exp", 1.0);
         return Math.pow(sev, exp) * base;
     }
-    // 나무 점화 확률
     private double treeIgniteChance(double sev) {
         double base = plugin.getConfig().getDouble("doomsday.trees.base", 0.10);
         double exp  = plugin.getConfig().getDouble("doomsday.trees.exp", 1.0);
         return Math.pow(sev, exp) * base;
     }
-    // 눈 녹는 확률
     private double meltChance(double sev) {
         return Math.min(1.0, 0.15 + sev * 0.6);
     }
 
-    // 지면에서 위로/아래로 소량 탐색하여 물을 한두 칸씩 증발
+    // ── 물 증발(강화판): 위/아래/옆으로 빠르게 줄이기
     private int evaporateWaterColumn(World w, int x, int y, int z, double sev) {
-        int maxSteps = 2;
         int changed = 0;
 
-        for (int dy = 0; dy <= 1 && changed < maxSteps; dy++) {
+        // 위로 0..2칸 (표면/수면)
+        for (int dy = 0; dy <= 2 && changed < waterMaxSteps; dy++) {
             Block b = w.getBlockAt(x, y + dy, z);
             if (isWater(b.getType()) && roll(evaporateChance(sev))) {
                 b.setType(Material.AIR, true);
                 changed++;
             }
         }
-        if (changed < maxSteps) {
-            Block b = w.getBlockAt(x, y - 1, z);
-            if (isWater(b.getType()) && roll(evaporateChance(sev) * 0.6)) {
+        // 아래로 1..extra-depth칸 (웅덩이 바닥 쪽)
+        for (int dd = 1; dd <= waterExtraDepth && changed < waterMaxSteps; dd++) {
+            Block b = w.getBlockAt(x, y - dd, z);
+            if (isWater(b.getType()) && roll(evaporateChance(sev) * 0.8)) {
+                b.setType(Material.AIR, true);
+                changed++;
+            }
+        }
+        // 수평 확산(같은 높이 y에서 이웃도 제거 시도) — 물 웅덩이가 더 빨리 줄어듦
+        for (int i = 0; i < waterLateralTries && changed < waterMaxSteps; i++) {
+            int dx = (rnd.nextBoolean() ? 1 : -1) * (1 + rnd.nextInt(1));
+            int dz = (rnd.nextBoolean() ? 1 : -1) * (1 + rnd.nextInt(1));
+            Block b = w.getBlockAt(x + dx, y, z + dz);
+            if (isWater(b.getType()) && roll(evaporateChance(sev))) {
                 b.setType(Material.AIR, true);
                 changed++;
             }
@@ -221,33 +241,61 @@ public class DoomsdayManager {
     private boolean isSnow(Material m) {
         return m == Material.SNOW || m == Material.SNOW_BLOCK || m == Material.POWDER_SNOW;
     }
-    private boolean isVegetation(Material m) {
-        String n = m.name(); // 이름 기반으로 비교해서 버전 호환
-        if (n.equals("SHORT_GRASS") || n.equals("GRASS") || n.equals("TALL_GRASS")) return true;
 
-        // 각종 식물/묘목/덩굴류
-        return n.endsWith("_FLOWER")
-                || n.endsWith("_SEEDS")
-                || n.endsWith("_FUNGUS")
-                || n.endsWith("_ROOTS")
-                || n.endsWith("_SAPLING")
-                || n.endsWith("_BUSH")
-                || n.endsWith("_FERN")
-                || n.endsWith("_DEAD_BUSH")
-                || n.endsWith("_VINES") || n.endsWith("_VINE")
-                || n.endsWith("_TORCHFLOWER")   // 1.20+
-                || n.endsWith("_PITCHER_PLANT"); // 1.20+
+    // 1.21 호환(이름 기반): SHORT_GRASS/GRASS/TALL_GRASS 등 폭넓게 처리
+    private boolean isVegetation(Material m) {
+        String n = m.name();
+        if (n.equals("SHORT_GRASS") || n.equals("GRASS") || n.equals("TALL_GRASS")) return true;
+        return n.endsWith("_FLOWER") || n.endsWith("_SEEDS") || n.endsWith("_FUNGUS") || n.endsWith("_ROOTS")
+                || n.endsWith("_SAPLING") || n.endsWith("_BUSH") || n.endsWith("_FERN")
+                || n.endsWith("_DEAD_BUSH") || n.endsWith("_VINES") || n.endsWith("_VINE")
+                || n.endsWith("_TORCHFLOWER") || n.endsWith("_PITCHER_PLANT");
     }
     private boolean isTree(Material m) {
         String n = m.name();
         return n.endsWith("_LOG") || n.endsWith("_WOOD") || n.endsWith("_HYPHAE")
                 || n.endsWith("_STEM") || n.endsWith("_LEAVES");
     }
-    private boolean roll(double p){ if(p<=0)return false; if(p>=1)return true; return rnd.nextDouble()<p; }
 
-    /* ---------------- 일광 화상(물 속 면제 + 동물 포함) ---------------- */
+    // 목재 구조물(판자/계단/슬랩/울타리/문/트랩도어/간판/책장/상자/사다리 등)
+    private boolean isWoodenBlock(Material m) {
+        String n = m.name();
+        if (n.endsWith("_PLANKS") || n.endsWith("_STAIRS") || n.endsWith("_SLAB")
+                || n.endsWith("_FENCE") || n.endsWith("_FENCE_GATE")
+                || n.endsWith("_DOOR") || n.endsWith("_TRAPDOOR")
+                || n.endsWith("_BUTTON") || n.endsWith("_PRESSURE_PLATE")
+                || n.endsWith("_SIGN") || n.endsWith("_HANGING_SIGN") || n.endsWith("_WALL_SIGN")) {
+            return true;
+        }
+        switch (n) {
+            case "BOOKSHELF": case "CHISELED_BOOKSHELF":
+            case "NOTE_BLOCK": case "JUKEBOX":
+            case "CRAFTING_TABLE": case "CARTOGRAPHY_TABLE":
+            case "FLETCHING_TABLE": case "SMITHING_TABLE": case "LOOM":
+            case "CHEST": case "TRAPPED_CHEST": case "BARREL":
+            case "LECTERN":
+            case "LADDER":
+            case "SCAFFOLDING": // 대나무 足場(가연성)
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    // 대상 블록 위/옆 공기칸에 불을 붙이기
+    private boolean tryIgniteAround(Block base) {
+        Block up = base.getRelative(0, 1, 0);
+        if (up.getType().isAir()) { up.setType(Material.FIRE, true); return true; }
+        int[][] dirs = {{1,0},{-1,0},{0,1},{0,-1}};
+        for (int[] d : dirs) {
+            Block side = base.getRelative(d[0], 0, d[1]);
+            if (side.getType().isAir()) { side.setType(Material.FIRE, true); return true; }
+        }
+        return false;
+    }
+
+    /* ---------------- 일광 화상(물 속 면제 + 모든 LivingEntity 적용) ---------------- */
     private void applySunburn(World w, double severity) {
-        // 플레이어
         for (org.bukkit.entity.LivingEntity e : w.getLivingEntities()) {
             applySunburnTo(w, e, severity);
         }
@@ -265,7 +313,7 @@ public class DoomsdayManager {
         if (!sky) return;
         if (loc.getBlock().getLightFromSky() < 14) return;
 
-        // ▶ 물 속/표면에 있으면 면제
+        // 물 속/표면에 있으면 면제
         if (isSubmergedInWater(e)) {
             e.setFireTicks(0);
             return;
