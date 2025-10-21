@@ -67,7 +67,7 @@ public class EarthquakeManager {
                             Block b = w.getBlockAt(top.getX(), top.getY()-d, top.getZ());
                             if (BlockUtils.canBreak(b.getType())) {
                                 w.spawnParticle(Particle.BLOCK, b.getLocation().add(0.5,0.5,0.5), 8, 0.2,0.2,0.2, 0, b.getBlockData());
-                                b.setType(Material.AIR, false);
+                                b.setType(Material.AIR, true);
                             }
                         }
                         w.playSound(top.getLocation(), Sound.BLOCK_DEEPSLATE_BREAK, 0.7f, 0.6f + rnd.nextFloat()*0.4f);

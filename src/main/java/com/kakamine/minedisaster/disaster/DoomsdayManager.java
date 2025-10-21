@@ -132,7 +132,7 @@ public class DoomsdayManager {
         // 물 증발
         if (isWater(type) && roll(waterProb)) {
             // 흐르는 물/정수 물 모두 공기화
-            top.setType(Material.AIR, false);
+            top.setType(Material.AIR, true);
             top.getWorld().spawnParticle(Particle.CLOUD, top.getLocation().add(0.5,0.8,0.5), 8, 0.2,0.2,0.2, 0.0);
             top.getWorld().playSound(top.getLocation(), Sound.BLOCK_FIRE_EXTINGUISH, 0.6f, 1.6f);
             return;
@@ -140,7 +140,7 @@ public class DoomsdayManager {
 
         // 잔디 → 흙
         if (type == Material.GRASS_BLOCK && roll(grassProb)) {
-            top.setType(Material.DIRT, false);
+            top.setType(Material.DIRT, true);
             top.getWorld().spawnParticle(Particle.ASH, top.getLocation().add(0.5,0.6,0.5), 6, 0.2,0.2,0.2, 0.0);
             return;
         }
@@ -149,7 +149,7 @@ public class DoomsdayManager {
         if ((Tag.LOGS.isTagged(type) || Tag.LEAVES.isTagged(type)) && roll(treeProb)) {
             Block up = top.getRelative(0,1,0);
             if (up.getType().isAir()) {
-                up.setType(Material.FIRE, false);
+                up.setType(Material.FIRE, true);
                 up.getWorld().playSound(up.getLocation(), Sound.ITEM_FLINTANDSTEEL_USE, 0.8f, 0.9f);
             }
         }

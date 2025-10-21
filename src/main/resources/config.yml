@@ -4,44 +4,47 @@ max-duration-seconds: 60
 max-blocks-total: 5000
 
 meteor:
-  # 기본
-  count: 3
-  explosion-power: 7          # 1~10 권장 (강력)
+  count: 4
+  explosion-power: 8
   ignite-fire: true
-  spawn-height: 70            # 타겟 기준 추가 높이
-  timeout-seconds: 20
+  spawn-height: 80
 
-  # 외형/코어 (겉 표면 + 내부 코어, 2겹 구)
+  # 랜덤 낙하지역(명령 타겟 주변)
+  random-radius: 18        # 이 반경 내 임의 지점들에 메테오가 소환됨
+
+  # 외형(더 큼) + 코어
   surface-material: MAGMA_BLOCK
   core-material: DEEPSLATE
-  surface-radius: 2.7
-  core-radius: 1.6
-  surface-pieces: 72          # 구 표면 조밀도 (24~128)
-  core-pieces: 28
+  surface-radius: 3.4
+  core-radius: 2.1
+  surface-pieces: 96
+  core-pieces: 36
 
-  # 낙하 이펙트
+  # 낙하 이펙트/속도 랜덤화
   trail-particle: FLAME
   smoke-particle: LARGE_SMOKE
-  trail-density: 2            # 틱당 파티클 수 (1~3)
-  fall-speed: 1.28            # 기본 속도 스케일
-  gravity-bias: -0.27         # 아래쪽으로 끌어내리는 편향
+  trail-density: 2
+  fall-speed: 1.35
+  gravity-bias: -0.30
+  # 추가: 낙하 방향 분산(도)
+  spread-angle-deg: 10     # 0~25 권장 (0=직진)
 
-  # 충돌 후 '파편' (잔해로 남는 낙하 블록)
+  timeout-seconds: 20
+
   debris:
-    count: 35                 # 파편 낙하블록 개수
-    material-1: DEEPSLATE     # 파편 재질 후보 1
-    material-2: MAGMA_BLOCK   # 파편 재질 후보 2
-    material-3: COBBLESTONE   # 파편 재질 후보 3
-    speed-min: 0.55           # 초기 속도 랜덤 범위
-    speed-max: 1.6
-    up-boost: 0.35            # 위로 튀는 힘
-    place-chance: 0.45        # 착지 시 실제 블록으로 남을 확률
+    count: 45
+    material-1: DEEPSLATE
+    material-2: MAGMA_BLOCK
+    material-3: COBBLESTONE
+    speed-min: 0.6
+    speed-max: 1.8
+    up-boost: 0.38
+    place-chance: 0.55
 
-  # 충돌 자국(그을음/용암 흔적)
   scorch:
-    radius: 4                 # 충돌 지점 주변 반경
-    magma-patch-chance: 0.30  # 상단 지형을 MAGMA_BLOCK로 교체하는 확률
-    fire-chance: 0.35         # 상단에 불을 붙일 확률
+    radius: 5
+    magma-patch-chance: 0.35
+    fire-chance: 0.40
     ash-particles: true
 
 
@@ -53,13 +56,13 @@ earthquake:
   breakable-depth: 3
 
 bacteria:
-  infection-block: SCULK       # 감염 시 겉모습(예: SCULK/BLACK_CONCRETE/SLIME_BLOCK 등)
-  replace-after: AIR           # 수명 종료 후 치환(보통 AIR)
-  lifetime-ticks: 200          # 감염 유지 시간 (200틱=10초)
-  tick-interval: 5             # 틱 간격(1틱=0.05s) — 작을수록 빠름/부하↑
-  per-tick: 120                # 틱당 신규 감염 최대 수
-  spread-chance: 0.45          # 이웃 감염 확률(0~1)
-  max-active: 0             # 동시에 존재 가능한 감염 블록 상한(세이프가드)
+  infection-block: SCULK
+  replace-after: AIR
+  lifetime-ticks: 200
+  tick-interval: 5
+  per-tick: 120
+  spread-chance: 0.45
+  max-active: 0           # <= 0 이면 끝까지 퍼짐(무제한)
   target-blocks:
     - GRASS_BLOCK
     - DIRT
