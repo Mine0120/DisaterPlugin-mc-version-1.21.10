@@ -122,8 +122,6 @@ Java 버전	Java 25
 
 Author: Kakamine
 
-Project Lead: 병희
-
 GitHub: github.com/yourusername/MineDisaster
 
 🧭 향후 추가 예정
