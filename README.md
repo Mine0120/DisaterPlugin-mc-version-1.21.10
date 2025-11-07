@@ -1,1 +1,142 @@
-마인크래프트 1.21.10 버전에서 메테오, 지진, 지구멸망, 박테리아 기능을 추가하여 즐길 수 있게 가볍게 만든 플러그인
+🧨 MineDisaster
+
+Spigot 1.21.10 | Java 25 | Kakamine Production
+
+MineDisaster는 마인크래프트 월드에 재앙 시스템을 추가하는 Spigot 기반 플러그인입니다.
+자연 재해부터 행성 파괴까지 — 당신의 월드를 점차 멸망으로 이끌어 보세요.
+
+⚙️ 주요 기능
+🌋 1. 메테오 (Meteor)
+
+하늘에서 거대한 마그마 구체가 랜덤하게 떨어집니다.
+
+충돌 시 폭발, 화염, 파편이 생성되어 주변 지형을 파괴합니다.
+
+폭발력과 구체 크기는 연동되어, 강도에 따라 다양하게 표현됩니다.
+
+/disaster meteor start : 랜덤한 위치에 메테오 소환
+
+/disaster meteor stop : 메테오 이벤트 중지
+
+🌎 2. 지진 (Earthquake)
+
+일정 반경 내의 지형이 흔들리며 파괴되는 재앙입니다.
+
+플레이어는 진동에 밀리거나 낙하 피해를 입을 수 있습니다.
+
+건축물이나 동굴 지형도 무너져내립니다.
+
+/disaster earthquake start : 지진 시작
+
+/disaster earthquake stop : 지진 종료
+
+🦠 3. 박테리아 (Bacteria)
+
+하나의 블럭에서 시작해 주변으로 번지며 지면을 갉아먹습니다.
+
+퍼짐 속도는 무한 확산 가능하며, 공기·배드락·명령블럭 등 파괴 불가 블록은 예외 처리됩니다.
+
+중지 명령어를 입력하면 스컬크로 변했던 흔적이 자동 정리됩니다.
+
+/disaster bacteria start : 박테리아 확산 시작
+
+/disaster bacteria stop : 박테리아 중지 및 흔적 제거
+
+☀️ 4. 지구 멸망 (Doomsday)
+
+시간이 지날수록 태양의 강도가 증가합니다.
+
+잔디가 흙으로, 눈은 녹고, 나무·목재는 불타며, 물은 증발합니다.
+
+낮에 하늘 아래 노출된 생명체는 화상을 입습니다.
+
+강도(Severity)는 자동 증가형 또는 /disaster doomsday set <0.0~1.0> 명령으로 수동 제어 가능합니다.
+
+/disaster doomsday start : 멸망 프로세스 시작
+
+/disaster doomsday stop : 중지
+
+/disaster doomsday reload : 설정 리로드
+
+⚡ 명령어 요약
+명령어	설명
+/disaster help	사용 가능한 모든 명령어 표시
+/disaster meteor start/stop	메테오 이벤트 제어
+/disaster earthquake start/stop	지진 이벤트 제어
+/disaster bacteria start/stop	박테리아 이벤트 제어
+/disaster doomsday start/stop	지구 멸망 이벤트 제어
+/disaster doomsday set <0.0~1.0>	강도 수동 설정
+/disaster reload	설정 리로드
+⚙️ config.yml 주요 설정
+doomsday:
+  enabled: true
+  tick-interval: 20
+  samples-per-tick: 80
+  start-after-days: 0
+  base-severity: 0.0
+  growth-per-day: 0.12
+  allow-manual: true
+
+  # 증발 가속도
+  water:
+    speed-mult: 2.5
+    max-steps: 4
+    extra-depth: 2
+    lateral-tries: 2
+
+  # 기본 효과 확률
+  water: { base: 0.12, exp: 1.1 }
+  trees: { base: 0.10, exp: 1.0 }
+  grass: { base: 0.12, exp: 1.0 }
+  burn:  { base-dps: 0.6, scale-dps: 1.8 }
+
+🧩 개발 정보
+항목	내용
+플러그인 이름	MineDisaster
+그룹명	com.kakamine.minedisaster
+Minecraft 버전	1.21.10
+API	Spigot / Paper
+Java 버전	Java 25
+빌드 시스템	Gradle (ShadowJar 사용)
+🧠 구현된 효과
+
+메테오: 실제 구체 구조 생성 → 중력 낙하 → 폭발 → 파편/불/분화구 생성
+
+지진: 랜덤 진동, 블럭 파괴, 낙하 피해
+
+박테리아: 확산/감염/자기 복제 시스템
+
+지구멸망: 환경 변화(눈 녹음, 물 증발, 불 번짐, 생명체 화상)
+
+📦 설치 방법
+
+/plugins/MineDisaster.jar 파일을 서버에 업로드
+
+서버 시작 후 plugins/MineDisaster/config.yml 자동 생성
+
+설정을 원하는 대로 조정 후 /disaster reload
+
+재앙 시작!
+
+🧑‍💻 제작자
+
+Author: Kakamine
+
+Project Lead: 병희
+
+GitHub: github.com/yourusername/MineDisaster
+
+🧭 향후 추가 예정
+
+🌪️ 토네이도 (회오리바람)
+
+🌊 해일 / 홍수 시스템
+
+🌑 달의 이상 현상 (Eclipse Event)
+
+☄️ 운석 낙하 패턴 다양화
+
+🛠️ 라이선스
+
+이 프로젝트는 MIT License 하에 배포됩니다.
+사용 및 수정은 자유이나, 원 저작자 표기를 유지해주세요.
